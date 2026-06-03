@@ -28,6 +28,8 @@ No install, no dependencies, nothing to keep updated — download one `.exe` and
    - **Save** (button, double-click, or Enter).
 3. That's it. Calibration is saved — you only redo it if your HUD/resolution changes.
 
+> Calibration is required on first launch; the app won't scan until the box is set.
+
 > Multi-monitor is supported — calibrate on whichever screen the game is on.
 
 ## Using it
@@ -48,9 +50,13 @@ No install, no dependencies, nothing to keep updated — download one `.exe` and
 | **Accent color** | Color picker for the readout tint — match your ship manufacturer's HUD color. |
 | **Label size** | Overlay text size. |
 | **Accurate OCR (slower)** | Turn on only if a number gets misread. |
-| **Show all matches for shared signatures** | ROC / FPS / Salvage deposits share some signature values (e.g. `6,000` could be **FPS ×2** *or* **Salvage ×3**). With this on, all valid readings are shown so you can decide. |
+| **Show rarity** | Show or hide the rarity tier after the name, e.g. `Riccite ×2 (Epic)`. |
 
-All settings are saved to `config.json` next to the exe.
+Settings are saved to `%APPDATA%\sig-translator\config.json` (Windows).
+
+ROC / FPS / Salvage deposits share some signature values (e.g. `18,000` could be
+**FPS ×6** *or* **Salvage ×9**); when a number is genuinely shared, the overlay always
+shows every valid reading so you can decide.
 
 ## Is this safe? (EAC / bans)
 

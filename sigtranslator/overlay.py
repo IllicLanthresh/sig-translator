@@ -91,7 +91,7 @@ class Overlay:
         lines: list[tuple[str, str, int]] = []
         for m in matches:
             tier = m.material.tier
-            suffix = f"  ({tier})" if tier in RARITY_TIERS else ""
+            suffix = f"  ({tier})" if (self.config.show_rarity and tier in RARITY_TIERS) else ""
             lines.append((f"{m.material.name} ×{m.count}{suffix}",
                           TIER_COLORS.get(tier, "#ffffff"), base))
         lines.append((f"sig {scanned:,}", self.config.accent_color, max(8, base - 6)))
@@ -361,6 +361,7 @@ def calibrate_region(master: tk.Misc, config: Config) -> Region:
     master.wait_window(cal.top)
     if cal.result and cal.result.width >= _MIN_SIZE and cal.result.height >= _MIN_SIZE:
         config.region = cal.result
+        config.calibrated = True
         config.save()
         print(f"[calibrate] saved region: {config.region}")
     else:

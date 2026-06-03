@@ -1,26 +1,33 @@
 """User configuration: capture region, scan FPS, toggle hotkey, overlay style.
 
-Stored as JSON next to the executable (``config.json``) so it survives restarts and
-is easy to hand-edit. This is the app's *own* settings file -- not a data source --
-so it has nothing to do with the "no external data dependency" rule.
+Stored as JSON in the standard per-user config location (``%APPDATA%\\sig-translator``
+on Windows, ``~/Library/Application Support/sig-translator`` on macOS), so it persists
+across updates and doesn't clutter wherever the exe happens to live. This is the app's
+*own* settings file -- not a data source -- so it has nothing to do with the "no
+external data dependency" rule.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 
-def _app_dir() -> Path:
-    """Directory to store config next to the exe (or cwd when run from source)."""
-    if getattr(sys, "frozen", False):  # PyInstaller bundle
-        return Path(sys.executable).parent
-    return Path.cwd()
+def _config_dir() -> Path:
+    """Standard per-user directory for this app's config."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return Path(base) / "sig-translator"
 
 
-CONFIG_PATH = _app_dir() / "config.json"
+CONFIG_PATH = _config_dir() / "config.json"
 
 
 @dataclass
@@ -58,16 +65,25 @@ class Config:
     ocr_upscale: float = 2.0
     # Skip OCR when the captured box hasn't changed (no signature on screen).
     skip_unchanged: bool = True
-    # Show every valid material for a signature (ROC/FPS/Salvage share multiples);
-    # False shows only the single best (largest-base) interpretation.
-    show_all_matches: bool = True
+    # Show the rarity tier in parentheses after the name, e.g. "Riccite ×2 (Epic)".
+    show_rarity: bool = True
+    # Set once the user has calibrated the capture box. Until then the app insists on
+    # calibration and won't scan a meaningless default region.
+    calibrated: bool = False
 
     @classmethod
     def load(cls) -> "Config":
         if CONFIG_PATH.exists():
             try:
                 raw = json.loads(CONFIG_PATH.read_text())
-                region = Region(**raw.pop("region", {}))
+                region_fields = {f.name for f in fields(Region)}
+                region_raw = {
+                    k: v for k, v in raw.pop("region", {}).items() if k in region_fields
+                }
+                region = Region(**region_raw)
+                # Ignore unknown/removed keys so old config files keep loading.
+                known = {f.name for f in fields(cls)} - {"region"}
+                raw = {k: v for k, v in raw.items() if k in known}
                 return cls(region=region, **raw)
             except Exception as exc:  # corrupt config -> fall back to defaults
                 print(f"[config] could not read {CONFIG_PATH}: {exc}; using defaults")
@@ -76,5 +92,6 @@ class Config:
         return cfg
 
     def save(self) -> None:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         data = asdict(self)
         CONFIG_PATH.write_text(json.dumps(data, indent=2))

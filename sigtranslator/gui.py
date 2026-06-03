@@ -35,6 +35,9 @@ class ControlPanel:
         self._register_hotkey()
         self._start_worker()
         self._poll_status()
+        # First launch: calibration is mandatory before anything will scan.
+        if not config.calibrated:
+            self.root.after(400, self._on_calibrate)
 
     # ---------------------------------------------------------------- widgets
     def _build_widgets(self) -> None:
@@ -119,14 +122,14 @@ class ControlPanel:
             command=self._on_detect,
         ).grid(row=row, column=0, columnspan=2, sticky="w", **pad)
 
-        # Show every valid material for a shared signature (ROC/FPS/Salvage)
+        # Show the rarity tier text after the name, e.g. "(Epic)"
         row += 1
-        self.showall_var = tk.BooleanVar(value=self.config.show_all_matches)
+        self.rarity_var = tk.BooleanVar(value=self.config.show_rarity)
         ttk.Checkbutton(
             frm,
-            text="Show all matches for shared signatures",
-            variable=self.showall_var,
-            command=self._on_showall,
+            text="Show rarity in the label, e.g. (Epic)",
+            variable=self.rarity_var,
+            command=self._on_rarity,
         ).grid(row=row, column=0, columnspan=2, sticky="w", **pad)
 
         # Status line
@@ -157,6 +160,11 @@ class ControlPanel:
         )
 
     def _toggle_capture(self) -> None:
+        # Calibration is mandatory: insist on it before capture can be turned on.
+        if not self.config.enabled and not self.config.calibrated:
+            self._on_calibrate()
+            if not self.config.calibrated:
+                return  # user cancelled; stay paused
         self.config.enabled = not self.config.enabled
         self.config.save()
         if not self.config.enabled:
@@ -192,8 +200,8 @@ class ControlPanel:
         self.config.ocr_detect = bool(self.detect_var.get())
         self.config.save()
 
-    def _on_showall(self) -> None:
-        self.config.show_all_matches = bool(self.showall_var.get())
+    def _on_rarity(self) -> None:
+        self.config.show_rarity = bool(self.rarity_var.get())
         self.config.save()
 
     def _on_accent(self) -> None:
@@ -274,7 +282,10 @@ class ControlPanel:
 
         while not self.stop_event.is_set():
             start = time.time()
-            if self.config.enabled:
+            if not self.config.calibrated:
+                self._last_status = "⚠ calibrate the box to start"
+                self.overlay.update_async(None)
+            elif self.config.enabled:
                 try:
                     # Force a fresh read after re-enabling or flipping OCR mode.
                     if not was_enabled or self.config.ocr_detect != was_detect:
@@ -305,8 +316,6 @@ class ControlPanel:
                             translate_matches(number, self.config.min_confidence)
                             if number else []
                         )
-                        if matches and not self.config.show_all_matches:
-                            matches = matches[:1]
                         if matches:
                             self.overlay.update_async(matches, number)
                             shown = " / ".join(
