@@ -7,9 +7,21 @@ is* and *how many nodes are in the cluster*.
 Example: a scanned signature of `3185` → **Stileron ×1**, `6370` → **Stileron ×2**,
 `19125` → **Laranite ×5**.
 
-> Status: **design / handoff stage.** No application code yet — this document
-> captures the decisions made so far so development can continue on another
-> machine (see [Handoff](#handoff--continuing-on-another-machine)).
+> Status: **v0.1 — first testable Windows build.** The signature table is baked
+> into the app (no `Data.p4k`, no file, no network — patch-proof against format
+> changes). Capture/OCR/overlay are implemented; calibrate the region once and go.
+
+## Quick start (Windows)
+
+1. Download `sig-translator.exe` from the [Releases](../../releases) page.
+2. **Calibrate once:** run `sig-translator.exe --calibrate`, then drag a box over
+   the in-game **signature number** on your mining HUD. Saved to `config.json`.
+3. Run `sig-translator.exe`. A label (e.g. `Stileron x2`) appears under the number.
+   Toggle the overlay with **Ctrl+Alt+S** (configurable).
+4. Not sure the box is right? `sig-translator.exe --snapshot` saves `snapshot.png`
+   of exactly what it's reading.
+
+Settings (region, scan FPS, hotkey, colors) live in `config.json` next to the exe.
 
 ---
 

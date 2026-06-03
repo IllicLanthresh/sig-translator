@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.idea/
+.pytest_cache/
+config.json
+snapshot.png
+snapshot.npy
+*.spec
+.venv/
+venv/
