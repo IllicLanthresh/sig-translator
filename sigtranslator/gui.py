@@ -13,6 +13,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
+from . import __version__
 from .config import Config
 from .overlay import Overlay, calibrate_region
 
@@ -25,7 +26,7 @@ class ControlPanel:
         self._last_status = "starting…"
 
         self.root = tk.Tk()
-        self.root.title("sig-translator")
+        self.root.title(f"sig-translator v{__version__}")
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
