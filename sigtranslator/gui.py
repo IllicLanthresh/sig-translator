@@ -46,16 +46,18 @@ class ControlPanel:
             row=row, column=0, columnspan=2, sticky="w", **pad
         )
 
-        # On/off switch
+        # On/off button (big, color-coded; mirrors the global hotkey)
         row += 1
-        self.enabled_var = tk.BooleanVar(value=self.config.enabled)
-        sw = ttk.Checkbutton(
+        self.toggle_btn = tk.Button(
             frm,
-            text="Overlay ON",
-            variable=self.enabled_var,
-            command=self._on_toggle,
+            text="",
+            width=28,
+            font=("", 11, "bold"),
+            cursor="hand2",
+            command=self._toggle_capture,
         )
-        sw.grid(row=row, column=0, columnspan=2, sticky="w", **pad)
+        self.toggle_btn.grid(row=row, column=0, columnspan=2, sticky="ew", **pad)
+        self._refresh_toggle()
 
         # Scan FPS
         row += 1
@@ -122,11 +124,23 @@ class ControlPanel:
         return f"{r.width}×{r.height} @ ({r.x},{r.y})"
 
     # ----------------------------------------------------------------- events
-    def _on_toggle(self) -> None:
-        self.config.enabled = bool(self.enabled_var.get())
+    def _refresh_toggle(self) -> None:
+        """Sync the toggle button's look to the current enabled state."""
+        on = self.config.enabled
+        self.toggle_btn.configure(
+            text=("●  Capturing  —  click to PAUSE" if on else "○  Paused  —  click to START"),
+            bg=("#1f9d55" if on else "#555555"),
+            fg="white",
+            activebackground=("#188048" if on else "#666666"),
+            activeforeground="white",
+        )
+
+    def _toggle_capture(self) -> None:
+        self.config.enabled = not self.config.enabled
         self.config.save()
         if not self.config.enabled:
             self.overlay.update_async(None)
+        self._refresh_toggle()
 
     def _on_fps(self, _value: str) -> None:
         self.config.scan_fps = round(float(self.fps_var.get()), 1)
@@ -179,10 +193,10 @@ class ControlPanel:
 
     def _do_hotkey_toggle(self) -> None:
         self.config.enabled = not self.config.enabled
-        self.enabled_var.set(self.config.enabled)
         self.config.save()
         if not self.config.enabled:
             self.overlay.update_async(None)
+        self._refresh_toggle()
 
     # ----------------------------------------------------------------- worker
     def _start_worker(self) -> None:
