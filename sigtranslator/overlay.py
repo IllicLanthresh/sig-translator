@@ -175,6 +175,7 @@ class _Calibrator:
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.canvas.bind("<Double-Button-1>", lambda _e: self._accept())
         self.top.bind("<Escape>", lambda _e: self._cancel())
         self.top.bind("<Return>", lambda _e: self._accept())
         for key, dx, dy in (("Left", -1, 0), ("Right", 1, 0), ("Up", 0, -1), ("Down", 0, 1)):
@@ -215,19 +216,19 @@ class _Calibrator:
         c.create_rectangle(b["l"], b["t"], b["r"], b["b"], outline="#00ff88", width=2)
         for hx, hy in self._handle_points().values():
             c.create_rectangle(hx - 6, hy - 6, hx + 6, hy + 6, fill="white", outline="#003322")
+        # Control strip anchored to the box, so it's always where you're working.
         w, h = b["r"] - b["l"], b["b"] - b["t"]
-        ly = b["t"] - 14 if b["t"] > 34 else b["b"] + 14
-        c.create_text((b["l"] + b["r"]) // 2, ly, fill="#00ff88", font=("Consolas", 12, "bold"),
-                      text=f"{w} x {h}  @ ({b['l']}, {b['t']})")
-        cx, ty = self.ui_cx, self.ui_top
-        c.create_text(cx, ty + 26, fill="white", font=("Consolas", 15, "bold"),
-                      text="Position the box over the in-game SIGNATURE number")
-        c.create_text(cx, ty + 50, fill="#cfcfcf", font=("Consolas", 11),
-                      text="Drag inside to move  •  drag handles to resize  •  arrows nudge "
-                           "(Shift = ×10)  •  Enter save  •  Esc cancel")
+        bcx = max(170, min(self.sw - 170, (b["l"] + b["r"]) // 2))
+        below = b["b"] + 56 <= self.sh
+        sy = (b["b"] + 16) if below else (b["t"] - 52)
+        c.create_text(bcx, sy, fill="#00ff88", font=("Consolas", 12, "bold"),
+                      text=f"{w} × {h}")
+        c.create_text(bcx, sy + 18, fill="#e8e8e8", font=("Consolas", 10),
+                      text="drag = move  •  handles = resize  •  arrows = nudge  "
+                           "•  double-click / Enter = SAVE  •  Esc = cancel")
         self._buttons.clear()
-        self._draw_button("save", cx - 130, ty + 70, "  Save  (Enter)  ", "#1f9d55")
-        self._draw_button("cancel", cx + 18, ty + 70, "  Cancel  (Esc)  ", "#aa3333")
+        self._draw_button("save", bcx - 124, sy + 30, "   ✓  Save   ", "#1f9d55")
+        self._draw_button("cancel", bcx + 22, sy + 30, "   ✗  Cancel   ", "#aa3333")
 
     def _draw_button(self, name, x, y, label, color) -> None:
         t = self.canvas.create_text(x, y, anchor="nw", fill="white",
