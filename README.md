@@ -8,6 +8,8 @@ it is and **how many nodes** are in the cluster.
 
 No install, no dependencies, nothing to keep updated — download one `.exe` and run it.
 
+![Shared signatures show every valid reading — here 18,000 is FPS Mineable ×6 or Salvage ×9, each colored by rarity](screenshots/image.png)
+
 ---
 
 ## Download
@@ -32,6 +34,8 @@ No install, no dependencies, nothing to keep updated — download one `.exe` and
 
 > Multi-monitor is supported — calibrate on whichever screen the game is on.
 
+![The calibration box — drag inside to move, drag the handles to resize, then Save](screenshots/image5.png)
+
 ## Using it
 
 - Scan a rock or wreck. A label appears just below the number showing the **material**
@@ -40,6 +44,15 @@ No install, no dependencies, nothing to keep updated — download one `.exe` and
 - Turn the overlay **on/off** with the big button in the panel or the global hotkey
   (**Ctrl+Alt+S** by default).
 - When there's no signature on screen, the overlay shows nothing.
+
+The material name is colored by its rarity tier, with the scanned signature echoed
+underneath — and it works the same in space or on a planet surface:
+
+<p>
+  <img src="screenshots/image4.png" width="280" alt="Riccite ×1 (Epic)">
+  <img src="screenshots/image2.png" width="280" alt="Torite ×4 (Uncommon)">
+  <img src="screenshots/image7.png" width="280" alt="Iron ×5 (Common), on a planet surface">
+</p>
 
 ## Settings (in the control panel)
 
@@ -59,10 +72,14 @@ shows every valid reading so you can decide.
 
 ## Is this safe? (EAC / bans)
 
-**Yes.** The app never touches, reads, or injects into the game. It only takes a
-read-only screenshot of a small region of your **desktop** — the same thing OBS and
-screenshot tools do — and draws a separate transparent window on top. It does not read
-or modify game memory, so it doesn't interact with EasyAntiCheat.
+This tool is designed to be as low-risk as possible: it never touches, injects into, or
+reads the game itself. It only takes a read-only screenshot of a small part of your
+**desktop** — the same thing OBS and screenshot tools do — and draws a separate window
+on top, so EasyAntiCheat doesn't interact with it in any way. It only surfaces
+information that's already on your own screen. That said, it's an unofficial third-party
+tool, and CIG's EULA gives them broad discretion over what they allow, so — as with any
+community overlay, calculator, or trade app — use it at your own discretion. If you want
+absolute certainty, CIG is always the final word.
 
 ## Troubleshooting
 
@@ -70,7 +87,8 @@ or modify game memory, so it doesn't interact with EasyAntiCheat.
   The `sig …` echo line tells you what it read.
 - **Label in the wrong place:** it sits just below your calibrated box — move the box.
 - **Two/three materials shown:** that signature is genuinely shared between deposit types
-  (ROC/FPS/Salvage). Toggle **Show all matches** off to see only the most likely one.
+  (ROC/FPS/Salvage), so the app shows every valid reading — pick the one that matches
+  what you're actually scanning.
 
 ## How it works (short version)
 
