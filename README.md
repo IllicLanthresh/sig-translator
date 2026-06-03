@@ -13,15 +13,15 @@ Example: a scanned signature of `3185` → **Stileron ×1**, `6370` → **Stiler
 
 ## Quick start (Windows)
 
-1. Download `sig-translator.exe` from the [Releases](../../releases) page.
-2. **Calibrate once:** run `sig-translator.exe --calibrate`, then drag a box over
-   the in-game **signature number** on your mining HUD. Saved to `config.json`.
-3. Run `sig-translator.exe`. A label (e.g. `Stileron x2`) appears under the number.
-   Toggle the overlay with **Ctrl+Alt+S** (configurable).
-4. Not sure the box is right? `sig-translator.exe --snapshot` saves `snapshot.png`
-   of exactly what it's reading.
+1. Download `sig-translator.exe` from the [Releases](../../releases) page and run it.
+2. A small **control panel** opens with: an **Overlay ON** switch, a **Scan FPS**
+   slider, a **Calibrate box…** button, the **toggle hotkey**, and label size.
+3. Click **Calibrate box…**, then drag a box over the in-game **signature number**
+   on your mining HUD. From then on a label (e.g. `Stileron x2`) floats just below it.
+4. Flip the overlay on/off from the panel or with the hotkey (**Ctrl+Alt+S** default).
 
-Settings (region, scan FPS, hotkey, colors) live in `config.json` next to the exe.
+Settings are saved to `config.json` next to the exe. `--snapshot` writes a PNG of
+the captured box if you want to double-check what it's reading.
 
 ---
 
