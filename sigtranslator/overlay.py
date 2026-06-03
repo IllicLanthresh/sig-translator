@@ -98,54 +98,235 @@ class Overlay:
             self.win.after(0, self.hide)
 
 
-def calibrate_region(master: tk.Misc, config: Config) -> Region:
-    """Fullscreen drag-to-select. Saves the chosen region to config and returns it."""
-    top = tk.Toplevel(master)
-    top.attributes("-fullscreen", True)
-    top.attributes("-topmost", True)
-    try:
-        top.attributes("-alpha", 0.3)
-    except tk.TclError:
-        pass
-    top.configure(bg="black", cursor="cross")
+# Resize-handle layout: handle name -> which box sides it moves.
+_HANDLE_SIDES = {
+    "nw": ("l", "t"), "n": ("t",), "ne": ("r", "t"),
+    "w": ("l",), "e": ("r",),
+    "sw": ("l", "b"), "s": ("b",), "se": ("r", "b"),
+}
+_HANDLE_CURSORS = {
+    "nw": "sizing", "ne": "sizing", "sw": "sizing", "se": "sizing",
+    "n": "sb_v_double_arrow", "s": "sb_v_double_arrow",
+    "w": "sb_h_double_arrow", "e": "sb_h_double_arrow",
+}
+_MIN_SIZE = 24
+_HANDLE_HIT = 11  # px tolerance for grabbing a handle
 
-    canvas = tk.Canvas(top, highlightthickness=0, bg="black")
-    canvas.pack(fill="both", expand=True)
-    canvas.create_text(
-        top.winfo_screenwidth() // 2,
-        40,
-        fill="#00ff88",
-        font=("Consolas", 16, "bold"),
-        text="Drag a box over the in-game SIGNATURE number, then release.  Esc to cancel.",
-    )
 
-    state: dict = {"x0": 0, "y0": 0, "rect": None, "result": None}
+class _Calibrator:
+    """Fullscreen movable/resizable selection box for choosing the capture region."""
 
-    def on_press(e):
-        state["x0"], state["y0"] = e.x, e.y
-        state["rect"] = canvas.create_rectangle(e.x, e.y, e.x, e.y, outline="#00ff88", width=2)
+    def __init__(self, master: tk.Misc, config: Config) -> None:
+        self.config = config
+        self.result: Region | None = None
 
-    def on_drag(e):
-        if state["rect"] is not None:
-            canvas.coords(state["rect"], state["x0"], state["y0"], e.x, e.y)
+        self.top = tk.Toplevel(master)
+        self.top.attributes("-topmost", True)
+        try:
+            self.top.attributes("-alpha", 0.4)  # dim the scene so the box stands out
+        except tk.TclError:
+            pass
+        self.top.configure(bg="#0a0a0a")
 
-    def on_release(e):
-        x0, y0, x1, y1 = state["x0"], state["y0"], e.x, e.y
-        state["result"] = Region(
-            x=min(x0, x1), y=min(y0, y1), width=abs(x1 - x0), height=abs(y1 - y0)
+        # Span the WHOLE virtual desktop (all monitors), in the same coordinate space
+        # mss captures in. This is what fixes the multi-monitor cursor jump: the grab
+        # now covers every screen, and the saved region maps 1:1 onto capture.
+        self.ox, self.oy = 0, 0
+        self.ui_cx = None  # primary-monitor center, for placing instructions
+        self.ui_top = 0
+        try:
+            import mss
+
+            with mss.mss() as sct:
+                mons = sct.monitors
+            vd = mons[0]  # union bounding box of all monitors
+            primary = mons[1] if len(mons) > 1 else mons[0]
+            self.ox, self.oy = int(vd["left"]), int(vd["top"])
+            self.sw, self.sh = int(vd["width"]), int(vd["height"])
+            self.ui_cx = int(primary["left"]) - self.ox + int(primary["width"]) // 2
+            self.ui_top = int(primary["top"]) - self.oy
+        except Exception:
+            self.sw = self.top.winfo_screenwidth()
+            self.sh = self.top.winfo_screenheight()
+        if self.ui_cx is None:
+            self.ui_cx = self.sw // 2
+        self.top.overrideredirect(True)
+        self.top.geometry(f"{self.sw}x{self.sh}+{self.ox}+{self.oy}")
+
+        self.canvas = tk.Canvas(self.top, highlightthickness=0, bg="#0a0a0a")
+        self.canvas.pack(fill="both", expand=True)
+
+        # Start from the current region (converted to window-local coords), or a
+        # sensible default centered on the desktop if never calibrated.
+        r = config.region
+        if r.width < _MIN_SIZE or r.height < _MIN_SIZE or (r.x == 0 and r.y == 0):
+            w, h = 420, 90
+            cx = (self.sw - w) // 2
+            cy = self.sh // 4
+            self.box = {"l": cx, "t": cy, "r": cx + w, "b": cy + h}
+        else:
+            lx, ty = r.x - self.ox, r.y - self.oy
+            self.box = {"l": lx, "t": ty, "r": lx + r.width, "b": ty + r.height}
+
+        self._drag = None
+        self._buttons: dict[str, tuple[int, int, int, int]] = {}
+
+        self.canvas.bind("<Motion>", self._on_motion)
+        self.canvas.bind("<ButtonPress-1>", self._on_press)
+        self.canvas.bind("<B1-Motion>", self._on_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.top.bind("<Escape>", lambda _e: self._cancel())
+        self.top.bind("<Return>", lambda _e: self._accept())
+        for key, dx, dy in (("Left", -1, 0), ("Right", 1, 0), ("Up", 0, -1), ("Down", 0, 1)):
+            self.top.bind(f"<{key}>", lambda _e, dx=dx, dy=dy: self._nudge(dx, dy))
+            self.top.bind(f"<Shift-{key}>", lambda _e, dx=dx, dy=dy: self._nudge(dx * 10, dy * 10))
+
+        self.top.grab_set()
+        self.top.focus_force()
+        self._draw()
+
+    def _handle_points(self) -> dict[str, tuple[int, int]]:
+        b = self.box
+        cx, cy = (b["l"] + b["r"]) // 2, (b["t"] + b["b"]) // 2
+        return {
+            "nw": (b["l"], b["t"]), "n": (cx, b["t"]), "ne": (b["r"], b["t"]),
+            "w": (b["l"], cy), "e": (b["r"], cy),
+            "sw": (b["l"], b["b"]), "s": (cx, b["b"]), "se": (b["r"], b["b"]),
+        }
+
+    def _hit_handle(self, x, y) -> str | None:
+        for name, (hx, hy) in self._handle_points().items():
+            if abs(x - hx) <= _HANDLE_HIT and abs(y - hy) <= _HANDLE_HIT:
+                return name
+        return None
+
+    def _inside(self, x, y) -> bool:
+        b = self.box
+        return b["l"] <= x <= b["r"] and b["t"] <= y <= b["b"]
+
+    def _draw(self) -> None:
+        c = self.canvas
+        c.delete("all")
+        b = self.box
+        # Faint green wash so the capture area reads clearly.
+        c.create_rectangle(b["l"], b["t"], b["r"], b["b"], fill="#00ff88", stipple="gray12", outline="")
+        # Double outline (dark backing + bright line) for contrast on any scene.
+        c.create_rectangle(b["l"], b["t"], b["r"], b["b"], outline="#003322", width=5)
+        c.create_rectangle(b["l"], b["t"], b["r"], b["b"], outline="#00ff88", width=2)
+        for hx, hy in self._handle_points().values():
+            c.create_rectangle(hx - 6, hy - 6, hx + 6, hy + 6, fill="white", outline="#003322")
+        w, h = b["r"] - b["l"], b["b"] - b["t"]
+        ly = b["t"] - 14 if b["t"] > 34 else b["b"] + 14
+        c.create_text((b["l"] + b["r"]) // 2, ly, fill="#00ff88", font=("Consolas", 12, "bold"),
+                      text=f"{w} x {h}  @ ({b['l']}, {b['t']})")
+        cx, ty = self.ui_cx, self.ui_top
+        c.create_text(cx, ty + 26, fill="white", font=("Consolas", 15, "bold"),
+                      text="Position the box over the in-game SIGNATURE number")
+        c.create_text(cx, ty + 50, fill="#cfcfcf", font=("Consolas", 11),
+                      text="Drag inside to move  •  drag handles to resize  •  arrows nudge "
+                           "(Shift = ×10)  •  Enter save  •  Esc cancel")
+        self._buttons.clear()
+        self._draw_button("save", cx - 130, ty + 70, "  Save  (Enter)  ", "#1f9d55")
+        self._draw_button("cancel", cx + 18, ty + 70, "  Cancel  (Esc)  ", "#aa3333")
+
+    def _draw_button(self, name, x, y, label, color) -> None:
+        t = self.canvas.create_text(x, y, anchor="nw", fill="white",
+                                     font=("Consolas", 12, "bold"), text=label)
+        x0, y0, x1, y1 = self.canvas.bbox(t)
+        pad = 6
+        x0, y0, x1, y1 = x0 - pad, y0 - pad, x1 + pad, y1 + pad
+        rect = self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="white")
+        self.canvas.tag_lower(rect, t)
+        self._buttons[name] = (x0, y0, x1, y1)
+
+    def _hit_button(self, x, y) -> str | None:
+        for name, (x0, y0, x1, y1) in self._buttons.items():
+            if x0 <= x <= x1 and y0 <= y <= y1:
+                return name
+        return None
+
+    def _on_motion(self, e) -> None:
+        if self._hit_button(e.x, e.y):
+            self.canvas.configure(cursor="hand2")
+            return
+        h = self._hit_handle(e.x, e.y)
+        if h:
+            self.canvas.configure(cursor=_HANDLE_CURSORS[h])
+        elif self._inside(e.x, e.y):
+            self.canvas.configure(cursor="fleur")
+        else:
+            self.canvas.configure(cursor="arrow")
+
+    def _on_press(self, e) -> None:
+        btn = self._hit_button(e.x, e.y)
+        if btn == "save":
+            self._accept()
+            return
+        if btn == "cancel":
+            self._cancel()
+            return
+        h = self._hit_handle(e.x, e.y)
+        if h:
+            self._drag = ("resize", h)
+        elif self._inside(e.x, e.y):
+            self._drag = ("move", (e.x - self.box["l"], e.y - self.box["t"]))
+        else:
+            self._drag = None
+
+    def _on_drag(self, e) -> None:
+        if not self._drag:
+            return
+        kind, data = self._drag
+        b = self.box
+        if kind == "move":
+            offx, offy = data
+            w, h = b["r"] - b["l"], b["b"] - b["t"]
+            b["l"] = max(0, min(self.sw - w, e.x - offx))
+            b["t"] = max(0, min(self.sh - h, e.y - offy))
+            b["r"], b["b"] = b["l"] + w, b["t"] + h
+        else:  # resize
+            for side in _HANDLE_SIDES[data]:
+                if side == "l":
+                    b["l"] = max(0, min(e.x, b["r"] - _MIN_SIZE))
+                elif side == "r":
+                    b["r"] = min(self.sw, max(e.x, b["l"] + _MIN_SIZE))
+                elif side == "t":
+                    b["t"] = max(0, min(e.y, b["b"] - _MIN_SIZE))
+                elif side == "b":
+                    b["b"] = min(self.sh, max(e.y, b["t"] + _MIN_SIZE))
+        self._draw()
+
+    def _on_release(self, _e) -> None:
+        self._drag = None
+
+    def _nudge(self, dx, dy) -> None:
+        b = self.box
+        w, h = b["r"] - b["l"], b["b"] - b["t"]
+        b["l"] = max(0, min(self.sw - w, b["l"] + dx))
+        b["t"] = max(0, min(self.sh - h, b["t"] + dy))
+        b["r"], b["b"] = b["l"] + w, b["t"] + h
+        self._draw()
+
+    def _accept(self) -> None:
+        b = self.box
+        # Convert window-local coords back to virtual-desktop coords for capture.
+        self.result = Region(
+            x=b["l"] + self.ox, y=b["t"] + self.oy,
+            width=b["r"] - b["l"], height=b["b"] - b["t"],
         )
-        top.destroy()
+        self.top.destroy()
 
-    canvas.bind("<ButtonPress-1>", on_press)
-    canvas.bind("<B1-Motion>", on_drag)
-    canvas.bind("<ButtonRelease-1>", on_release)
-    top.bind("<Escape>", lambda _e: top.destroy())
-    top.grab_set()
-    master.wait_window(top)
+    def _cancel(self) -> None:
+        self.result = None
+        self.top.destroy()
 
-    res = state["result"]
-    if res and res.width > 10 and res.height > 10:
-        config.region = res
+
+def calibrate_region(master: tk.Misc, config: Config) -> Region:
+    """Show a movable/resizable selection box; save the chosen region to config."""
+    cal = _Calibrator(master, config)
+    master.wait_window(cal.top)
+    if cal.result and cal.result.width >= _MIN_SIZE and cal.result.height >= _MIN_SIZE:
+        config.region = cal.result
         config.save()
         print(f"[calibrate] saved region: {config.region}")
     else:
