@@ -96,6 +96,16 @@ class ControlPanel:
             command=self._on_style,
         ).grid(row=row, column=1, sticky="w", **pad)
 
+        # OCR mode: recognition-only (fast) vs full detect+recognize (slower)
+        row += 1
+        self.detect_var = tk.BooleanVar(value=self.config.ocr_detect)
+        ttk.Checkbutton(
+            frm,
+            text="Accurate OCR (slower) — try if it misreads",
+            variable=self.detect_var,
+            command=self._on_detect,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", **pad)
+
         # Status line
         row += 1
         self.status_var = tk.StringVar(value="starting…")
@@ -143,6 +153,10 @@ class ControlPanel:
         self.config.save()
         self.overlay.restyle()
 
+    def _on_detect(self) -> None:
+        self.config.ocr_detect = bool(self.detect_var.get())
+        self.config.save()
+
     # ----------------------------------------------------------------- hotkey
     def _register_hotkey(self) -> None:
         try:
@@ -175,8 +189,18 @@ class ControlPanel:
         self._worker = threading.Thread(target=self._run_loop, daemon=True)
         self._worker.start()
 
+    @staticmethod
+    def _frame_fingerprint(img):
+        """Cheap downsampled-grayscale fingerprint for change detection."""
+        import numpy as np
+
+        small = img[::8, ::8]
+        return small.mean(axis=2) if small.ndim == 3 else small.astype("float32")
+
     def _run_loop(self) -> None:
         import time
+
+        import numpy as np
 
         try:
             from .capture import Capture
@@ -188,30 +212,66 @@ class ControlPanel:
 
         try:
             capture = Capture()
-            ocr = DigitOCR()
+            ocr = DigitOCR(threads=self.config.ocr_threads)
         except Exception as exc:
             self._last_status = f"init failed: {exc}"
             return
         self._last_status = "ready"
 
+        last_fp = None  # fingerprint of the last frame we actually OCR'd
+        was_enabled = self.config.enabled
+        was_detect = self.config.ocr_detect
+
         while not self.stop_event.is_set():
             start = time.time()
             if self.config.enabled:
                 try:
+                    # Force a fresh read after re-enabling or flipping OCR mode.
+                    if not was_enabled or self.config.ocr_detect != was_detect:
+                        last_fp = None
+                    t0 = time.time()
                     img = capture.grab(self.config.region)
-                    number = ocr.read_number(img)
-                    match = translate(number) if number else None
-                    if match and match.confidence >= self.config.min_confidence:
-                        self.overlay.update_async(match.label)
-                        self._last_status = f"{number} → {match.label}"
+                    cap_ms = (time.time() - t0) * 1000
+
+                    # Skip OCR entirely when the box hasn't changed (no new signature).
+                    fp = self._frame_fingerprint(img)
+                    if (
+                        self.config.skip_unchanged
+                        and last_fp is not None
+                        and last_fp.shape == fp.shape
+                        and float(np.abs(fp - last_fp).mean()) < 2.0
+                    ):
+                        self._last_status = f"idle (cap {cap_ms:.0f}ms, ocr skipped)"
                     else:
-                        self.overlay.update_async(None)
-                        self._last_status = f"{number or '—'} (no match)"
+                        last_fp = fp
+                        t1 = time.time()
+                        number = ocr.read_number(
+                            img,
+                            detect=self.config.ocr_detect,
+                            upscale=self.config.ocr_upscale,
+                        )
+                        ocr_ms = (time.time() - t1) * 1000
+                        match = translate(number) if number else None
+                        if match and match.confidence >= self.config.min_confidence:
+                            self.overlay.update_async(match.label)
+                            self._last_status = (
+                                f"{number} → {match.label}  "
+                                f"(cap {cap_ms:.0f}ms, ocr {ocr_ms:.0f}ms)"
+                            )
+                        else:
+                            self.overlay.update_async(None)
+                            self._last_status = (
+                                f"{number or '—'} (no match)  "
+                                f"(cap {cap_ms:.0f}ms, ocr {ocr_ms:.0f}ms)"
+                            )
                 except Exception as exc:
                     self._last_status = f"loop error: {exc}"
                     self.overlay.update_async(None)
             else:
                 self._last_status = "overlay off"
+            was_enabled = self.config.enabled
+            was_detect = self.config.ocr_detect
+
             period = 1.0 / max(0.5, self.config.scan_fps)
             time.sleep(max(0.0, period - (time.time() - start)))
 
