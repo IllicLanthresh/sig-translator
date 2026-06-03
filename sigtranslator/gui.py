@@ -99,6 +99,16 @@ class ControlPanel:
             command=self._on_style,
         ).grid(row=row, column=1, sticky="w", **pad)
 
+        # Accent color (match your ship manufacturer's HUD tint)
+        row += 1
+        ttk.Label(frm, text="Accent color").grid(row=row, column=0, sticky="w", **pad)
+        accent_box = ttk.Frame(frm)
+        accent_box.grid(row=row, column=1, sticky="w", **pad)
+        self.accent_swatch = tk.Label(accent_box, bg=self.config.accent_color,
+                                      width=3, relief="sunken")
+        self.accent_swatch.pack(side="left", padx=(0, 6))
+        ttk.Button(accent_box, text="Pick…", command=self._on_accent).pack(side="left")
+
         # OCR mode: recognition-only (fast) vs full detect+recognize (slower)
         row += 1
         self.detect_var = tk.BooleanVar(value=self.config.ocr_detect)
@@ -107,6 +117,16 @@ class ControlPanel:
             text="Accurate OCR (slower) — try if it misreads",
             variable=self.detect_var,
             command=self._on_detect,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", **pad)
+
+        # Show every valid material for a shared signature (ROC/FPS/Salvage)
+        row += 1
+        self.showall_var = tk.BooleanVar(value=self.config.show_all_matches)
+        ttk.Checkbutton(
+            frm,
+            text="Show all matches for shared signatures",
+            variable=self.showall_var,
+            command=self._on_showall,
         ).grid(row=row, column=0, columnspan=2, sticky="w", **pad)
 
         # Status line
@@ -172,6 +192,21 @@ class ControlPanel:
         self.config.ocr_detect = bool(self.detect_var.get())
         self.config.save()
 
+    def _on_showall(self) -> None:
+        self.config.show_all_matches = bool(self.showall_var.get())
+        self.config.save()
+
+    def _on_accent(self) -> None:
+        from tkinter import colorchooser
+
+        _rgb, hex_color = colorchooser.askcolor(
+            color=self.config.accent_color, title="Accent color"
+        )
+        if hex_color:
+            self.config.accent_color = hex_color
+            self.config.save()
+            self.accent_swatch.configure(bg=hex_color)
+
     # ----------------------------------------------------------------- hotkey
     def _register_hotkey(self) -> None:
         try:
@@ -220,7 +255,7 @@ class ControlPanel:
         try:
             from .capture import Capture
             from .ocr import DigitOCR
-            from .translate import translate
+            from .translate import translate_matches
         except Exception as exc:
             self._last_status = f"capture/OCR import failed: {exc}"
             return
@@ -266,11 +301,19 @@ class ControlPanel:
                             upscale=self.config.ocr_upscale,
                         )
                         ocr_ms = (time.time() - t1) * 1000
-                        match = translate(number) if number else None
-                        if match and match.confidence >= self.config.min_confidence:
-                            self.overlay.update_async(match.label)
+                        matches = (
+                            translate_matches(number, self.config.min_confidence)
+                            if number else []
+                        )
+                        if matches and not self.config.show_all_matches:
+                            matches = matches[:1]
+                        if matches:
+                            self.overlay.update_async(matches, number)
+                            shown = " / ".join(
+                                f"{m.material.name}×{m.count}" for m in matches
+                            )
                             self._last_status = (
-                                f"{number} → {match.label}  "
+                                f"{number} → {shown}  "
                                 f"(cap {cap_ms:.0f}ms, ocr {ocr_ms:.0f}ms)"
                             )
                         else:

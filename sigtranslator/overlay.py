@@ -15,6 +15,7 @@ import sys
 import tkinter as tk
 
 from .config import Config, Region
+from .materials import RARITY_TIERS, TIER_COLORS
 
 # Color treated as fully transparent by the window (must not appear in the text).
 _TRANSPARENT_KEY = "#010203"
@@ -42,7 +43,15 @@ def _make_click_through(win: tk.Toplevel) -> None:
 
 
 class Overlay:
-    """A single floating label positioned just below the capture region."""
+    """Floating, SC-styled readout positioned just below the capture region.
+
+    Drawn on a transparent canvas as outlined ("glowing") text -- one colored line
+    per material match (name ×count, colored by rarity) plus a small cyan line echoing
+    the scanned signature for cross-checking. The dark outline keeps it legible over
+    both bright rock and dark space, blending with Star Citizen's HUD.
+    """
+
+    _SHADOW = "#001218"   # dark halo behind the text
 
     def __init__(self, master: tk.Misc, config: Config) -> None:
         self.config = config
@@ -54,46 +63,70 @@ class Overlay:
         except tk.TclError:
             pass  # non-Windows: transparentcolor unsupported, still usable for dev
         self.win.configure(bg=_TRANSPARENT_KEY)
-
-        self._text = tk.StringVar(value="")
-        self._label = tk.Label(
-            self.win,
-            textvariable=self._text,
-            fg=config.text_color,
-            bg=_TRANSPARENT_KEY,
-            font=("Consolas", config.font_size, "bold"),
-        )
-        self._label.pack()
+        self.canvas = tk.Canvas(self.win, bg=_TRANSPARENT_KEY, highlightthickness=0, bd=0)
+        self.canvas.pack()
+        self._fonts: list = []  # keep Font refs alive while drawn
         self.win.withdraw()
         self.win.update_idletasks()
         _make_click_through(self.win)
 
     def restyle(self) -> None:
-        self._label.configure(
-            fg=self.config.text_color,
-            font=("Consolas", self.config.font_size, "bold"),
-        )
+        # Redrawn every scan, so font/size/color changes take effect on the next read.
+        pass
 
-    def _position(self) -> tuple[int, int]:
+    def _outlined(self, cx: int, y: int, text: str, color: str, font) -> None:
+        c = self.canvas
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx or dy:
+                    c.create_text(cx + dx, y + dy, text=text, fill=self._SHADOW,
+                                  font=font, anchor="n")
+        c.create_text(cx, y, text=text, fill=color, font=font, anchor="n")
+
+    def show_matches(self, matches, scanned: int) -> None:
+        import tkinter.font as tkfont
+
+        fam = self.config.font_family
+        base = self.config.font_size
+        lines: list[tuple[str, str, int]] = []
+        for m in matches:
+            tier = m.material.tier
+            suffix = f"  ({tier})" if tier in RARITY_TIERS else ""
+            lines.append((f"{m.material.name} ×{m.count}{suffix}",
+                          TIER_COLORS.get(tier, "#ffffff"), base))
+        lines.append((f"sig {scanned:,}", self.config.accent_color, max(8, base - 6)))
+
+        self._fonts = [tkfont.Font(family=fam, size=s, weight="bold") for (_, _, s) in lines]
+        widths = [f.measure(t) for (t, _, _), f in zip(lines, self._fonts)]
+        heights = [f.metrics("linespace") for f in self._fonts]
+        pad = 6
+        total_w = max(widths) + pad * 2 + 4
+        total_h = sum(heights) + pad * 2 + (len(lines) - 1) * 2
+
+        c = self.canvas
+        c.delete("all")
+        c.configure(width=total_w, height=total_h)
+        cx = total_w // 2
+        y = pad
+        for (text, color, _), f, h in zip(lines, self._fonts, heights):
+            self._outlined(cx, y, text, color, f)
+            y += h + 2
+
         r = self.config.region
-        return r.x + r.width // 2, r.y + r.height + 4
-
-    def show(self, text: str) -> None:
-        self._text.set(text)
-        x, y = self._position()
+        x = r.x + r.width // 2
+        wy = r.y + r.height + 4
         self.win.deiconify()
         self.win.update_idletasks()
-        w = self.win.winfo_width()
-        self.win.geometry(f"+{max(0, x - w // 2)}+{y}")
+        self.win.geometry(f"{total_w}x{total_h}+{max(0, x - total_w // 2)}+{wy}")
         self.win.lift()
 
     def hide(self) -> None:
         self.win.withdraw()
 
-    def update_async(self, text: str | None) -> None:
+    def update_async(self, matches, scanned: int = 0) -> None:
         """Thread-safe: schedule a label update on the Tk thread."""
-        if text:
-            self.win.after(0, lambda: self.show(text))
+        if matches:
+            self.win.after(0, lambda: self.show_matches(matches, scanned))
         else:
             self.win.after(0, self.hide)
 

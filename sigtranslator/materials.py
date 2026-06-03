@@ -38,6 +38,21 @@ TIER_MAX_NODES = {
     "Salvage": 15,
 }
 
+# Overlay colors per tier, matching the scmdb signature chart.
+TIER_COLORS = {
+    "Legendary": "#f0a83c",      # orange
+    "Epic": "#bf5bd6",           # magenta/purple
+    "Rare": "#5b8def",           # blue
+    "Uncommon": "#3fb96b",       # green
+    "Common": "#b8bcc2",         # grey
+    "ROC Mineables": "#2bbf8a",  # teal-green
+    "FPS Mineables": "#6aa6e0",  # light blue
+    "Salvage": "#c9b27c",        # tan
+}
+
+# The "true" rarity tiers (everything else is a special deposit type).
+RARITY_TIERS = {"Legendary", "Epic", "Rare", "Uncommon", "Common"}
+
 
 def _m(name: str, base: int, tier: str) -> Material:
     return Material(name=name, base=base, tier=tier, max_nodes=TIER_MAX_NODES[tier])

@@ -58,3 +58,23 @@ def translate_all(scanned: int, limit: int = 3) -> list[Match]:
     matches = [m for material in MATERIALS if (m := _evaluate(material, scanned))]
     matches.sort(key=lambda m: m.residual)
     return matches[:limit]
+
+
+def translate_matches(scanned: int, min_confidence: float = 0.985) -> list[Match]:
+    """All equally-best matches for a signature, larger base first.
+
+    Returns only readings tied at the *best* residual, so a clean number yields the
+    single right material -- neighboring ores (bases just 15 apart) are NOT included
+    as near-misses. The special tiers, however, share *exact* multiples
+    (6000 = FPS x2 = Salvage x3), so those genuinely-ambiguous readings all come back.
+    Empty if nothing matches confidently.
+    """
+    evaluated = [m for material in MATERIALS if (m := _evaluate(material, scanned))]
+    if not evaluated:
+        return []
+    best = min(evaluated, key=lambda m: m.residual)
+    if best.confidence < min_confidence:
+        return []
+    tied = [m for m in evaluated if m.residual == best.residual]
+    tied.sort(key=lambda m: -m.material.base)
+    return tied

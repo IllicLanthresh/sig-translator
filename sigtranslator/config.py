@@ -44,6 +44,10 @@ class Config:
     font_size: int = 18
     text_color: str = "#00ff88"
     outline: bool = True
+    # Star-Citizen-ish HUD font (ships on Windows 10/11); Tk substitutes if missing.
+    font_family: str = "Bahnschrift"
+    # Accent tint for the signature line — match your ship manufacturer's HUD color.
+    accent_color: str = "#7fdfff"
     # --- OCR performance knobs (keep the game smooth) ---
     # onnxruntime defaults to using every CPU core, which starves the game; cap it.
     ocr_threads: int = 1
@@ -54,6 +58,9 @@ class Config:
     ocr_upscale: float = 2.0
     # Skip OCR when the captured box hasn't changed (no signature on screen).
     skip_unchanged: bool = True
+    # Show every valid material for a signature (ROC/FPS/Salvage share multiples);
+    # False shows only the single best (largest-base) interpretation.
+    show_all_matches: bool = True
 
     @classmethod
     def load(cls) -> "Config":
