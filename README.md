@@ -103,6 +103,58 @@ the bundled JSON always present as a fallback/cache.
 
 ---
 
+## Community documentation & data-extraction findings
+
+Research into how the community sources these values turned up two camps and,
+importantly, a concrete extraction path:
+
+**1. User-facing tools mostly use community-measured values.**
+The scmdb chart, `RainbowRamen/sc-mining-hud`, and the widely-shared **MrKraken**
+per-patch chart all use values measured in-game and updated by hand each patch.
+No public document gives a *formula* that derives RS from rock mass / cross
+section — RS is treated as a **predefined per-resource property**, and the total
+cluster reading is simply `base_RS × node_count` (confirmed across multiple
+guides).
+
+**2. But there are open-source game-data dumps where per-resource data lives.**
+Several projects parse the actual game files into browsable JSON — meaning the
+value may be **greppable without unpacking `Data.p4k` from scratch**:
+
+| Project | What it is | Use |
+|---|---|---|
+| [`StarCitizenWiki/scunpacked-data`](https://github.com/StarCitizenWiki/scunpacked-data) | The **already-dumped** game data as JSON | Clone & grep directly — fastest way to check if RS is in the data, no p4k needed |
+| [`octfx/ScDataDumper`](https://github.com/octfx/ScDataDumper) | Current/maintained .NET loader that dumps game files → JSON | Run against the local install to produce a fresh dump for the live patch |
+| [`richardthombs/scunpacked`](https://github.com/richardthombs/scunpacked) | Original .NET data browser/API; parses extracted XML → JSON (`items/` folder per class) | Reference for entity/field structure |
+| [`scdatatools`](https://pypi.org/project/scdatatools/) | Python-native p4k + DataForge tools | Python alternative; fits our stack |
+| [`dolkensp/unp4k`](https://github.com/dolkensp/unp4k) + `unforge` | Raw extractor + CryXML/DataForge deserializer | Low-level fallback |
+
+**Confirmed mechanic:** ship-mineable rocks / gem deposits carry a **Radar
+Signature (RS)** value per resource type; the scanner shows `base_RS × nodes`.
+What I could **not** confirm from the open web (GitHub code search and the SC
+wiki are auth/bot-gated) is the **exact DataForge field name** and whether the
+dumped value equals the chart value byte-for-byte or needs scaling. That's the
+one thing to verify first on the Mac.
+
+### Fastest way to settle the data-source question (do this first)
+1. **Check the pre-dumped JSON, no p4k required:**
+   `git clone https://github.com/StarCitizenWiki/scunpacked-data` and grep for ore
+   names (`Quantainium`, `Stileron`, `Bexalite`, `Laranite`) and for likely field
+   names (`radar`, `signature`, `RS`, `signal`). See if a value like Bexalite
+   `3600` or Quantainium `3170` appears against a mineable entity.
+2. **If found** → note the exact field/path; implement `data/p4k.py` to read the
+   same field (either from the live `Data.p4k` via `scdatatools`, or by running
+   `ScDataDumper` and reading its JSON). Validate every value against the table
+   below.
+3. **If the dumped value differs / isn't present** → the chart values really are
+   measured, not stored; ship the bundled JSON (+ optional auto-update URL) and
+   move on. Either way the `DataProvider` interface keeps both options open.
+
+> Note: even the "extract from p4k" path is really "run a dumper, then read its
+> output" — the same pipeline the community dumps use — so it's automatable per
+> patch regardless.
+
+---
+
 ## Reference: known RS base values (from the scmdb / MrKraken chart)
 
 Seed data for a bundled JSON fallback and for validating any p4k extraction.
