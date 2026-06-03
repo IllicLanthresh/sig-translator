@@ -41,7 +41,7 @@ jobs:
 
       - name: Build exe
         run: >
-          pyinstaller --noconfirm --onefile
+          pyinstaller --noconfirm --onefile --windowed
           --name sig-translator-${{ steps.ver.outputs.version }}
           --collect-all rapidocr_onnxruntime
           --collect-all onnxruntime
