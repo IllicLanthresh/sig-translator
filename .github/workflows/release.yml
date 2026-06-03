@@ -34,7 +34,7 @@ jobs:
           pyinstaller --noconfirm --onefile --name sig-translator
           --collect-all rapidocr_onnxruntime
           --collect-all onnxruntime
-          sigtranslator/__main__.py
+          run.py
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
