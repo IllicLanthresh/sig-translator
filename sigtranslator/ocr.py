@@ -19,6 +19,9 @@ import re
 import numpy as np
 
 _DIGITS = re.compile(r"\d+")
+# Thousands separators / spaces the HUD or OCR may put inside the number
+# (e.g. "6,770", "16 900"). Stripped so the digits join into one value.
+_SEPARATORS = re.compile(r"[,.\'\s\u00a0\u2009]")
 
 
 def _extract_number(rows) -> int | None:
@@ -28,6 +31,9 @@ def _extract_number(rows) -> int | None:
       * recognition-only: ``[[text, score], ...]``
       * full pipeline:    ``[[box, text, score], ...]``
     In both, the text is the second-to-last item and the score is the last.
+
+    Thousands separators are removed first, so the in-game "6,770" reads as 6770
+    instead of splitting into 6 and 770.
     """
     if not rows:
         return None
@@ -38,7 +44,8 @@ def _extract_number(rows) -> int | None:
         text, score = str(row[-2]), row[-1]
         if isinstance(score, (int, float)) and score < 0.4:
             continue
-        for chunk in _DIGITS.findall(text.replace(" ", "")):
+        clean = _SEPARATORS.sub("", text)
+        for chunk in _DIGITS.findall(clean):
             if 3 <= len(chunk) <= 6:  # signatures are 4-5 digits (2,000 .. ~64,500)
                 candidates.append(int(chunk))
     if not candidates:
