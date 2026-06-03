@@ -58,11 +58,6 @@ class Config:
     # --- OCR performance knobs (keep the game smooth) ---
     # onnxruntime defaults to using every CPU core, which starves the game; cap it.
     ocr_threads: int = 1
-    # False = recognition-only on the calibrated box (fast, no detection model).
-    # True = full detect+recognize pipeline (slower, only if the box has clutter).
-    ocr_detect: bool = False
-    # Upscale tiny number crops so the recognizer reads them cleanly.
-    ocr_upscale: float = 2.0
     # Skip OCR when the captured box hasn't changed (no signature on screen).
     skip_unchanged: bool = True
     # Show the rarity tier in parentheses after the name, e.g. "Riccite ×2 (Epic)".

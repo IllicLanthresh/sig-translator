@@ -83,12 +83,14 @@ class DigitOCR:
         return img
 
     def read_number(
-        self, img: np.ndarray, detect: bool = False, upscale: float = 2.0
+        self, img: np.ndarray, detect: bool = True, upscale: float = 2.0
     ) -> int | None:
         """Return the most likely signature integer in the image, or None.
 
-        ``detect=False`` (default) runs recognition-only on the crop -- fast, assumes a
-        tight calibration box. ``detect=True`` runs the full detect+recognize pipeline.
+        ``detect=True`` (default) runs the full detect+recognize pipeline, which is what
+        reliably finds the HUD digits. Recognition-only (``detect=False``) is faster but
+        only works on a perfectly tight crop, so it's not used by default. onnxruntime
+        threads are capped (see ``__init__``) so detection stays smooth alongside the game.
         """
         if not detect:
             img = self._prepare(img, upscale)

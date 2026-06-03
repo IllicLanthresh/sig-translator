@@ -49,7 +49,6 @@ No install, no dependencies, nothing to keep updated — download one `.exe` and
 | **Scan FPS** | How often it reads the screen. |
 | **Accent color** | Color picker for the readout tint — match your ship manufacturer's HUD color. |
 | **Label size** | Overlay text size. |
-| **Accurate OCR (slower)** | Turn on only if a number gets misread. |
 | **Show rarity** | Show or hide the rarity tier after the name, e.g. `Riccite ×2 (Epic)`. |
 
 Settings are saved to `%APPDATA%\sig-translator\config.json` (Windows).
@@ -67,8 +66,8 @@ or modify game memory, so it doesn't interact with EasyAntiCheat.
 
 ## Troubleshooting
 
-- **Wrong number, or no label appears:** re-calibrate so the box hugs *just* the number,
-  and try turning on **Accurate OCR**. The `sig …` echo line tells you what it read.
+- **Wrong number, or no label appears:** re-calibrate so the box hugs *just* the number.
+  The `sig …` echo line tells you what it read.
 - **Label in the wrong place:** it sits just below your calibrated box — move the box.
 - **Two/three materials shown:** that signature is genuinely shared between deposit types
   (ROC/FPS/Salvage). Toggle **Show all matches** off to see only the most likely one.

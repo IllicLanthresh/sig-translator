@@ -35,9 +35,6 @@ class ControlPanel:
         self._register_hotkey()
         self._start_worker()
         self._poll_status()
-        # First launch: calibration is mandatory before anything will scan.
-        if not config.calibrated:
-            self.root.after(400, self._on_calibrate)
 
     # ---------------------------------------------------------------- widgets
     def _build_widgets(self) -> None:
@@ -112,16 +109,6 @@ class ControlPanel:
         self.accent_swatch.pack(side="left", padx=(0, 6))
         ttk.Button(accent_box, text="Pick…", command=self._on_accent).pack(side="left")
 
-        # OCR mode: recognition-only (fast) vs full detect+recognize (slower)
-        row += 1
-        self.detect_var = tk.BooleanVar(value=self.config.ocr_detect)
-        ttk.Checkbutton(
-            frm,
-            text="Accurate OCR (slower) — try if it misreads",
-            variable=self.detect_var,
-            command=self._on_detect,
-        ).grid(row=row, column=0, columnspan=2, sticky="w", **pad)
-
         # Show the rarity tier text after the name, e.g. "(Epic)"
         row += 1
         self.rarity_var = tk.BooleanVar(value=self.config.show_rarity)
@@ -160,11 +147,6 @@ class ControlPanel:
         )
 
     def _toggle_capture(self) -> None:
-        # Calibration is mandatory: insist on it before capture can be turned on.
-        if not self.config.enabled and not self.config.calibrated:
-            self._on_calibrate()
-            if not self.config.calibrated:
-                return  # user cancelled; stay paused
         self.config.enabled = not self.config.enabled
         self.config.save()
         if not self.config.enabled:
@@ -195,10 +177,6 @@ class ControlPanel:
         self.config.font_size = int(self.font_var.get())
         self.config.save()
         self.overlay.restyle()
-
-    def _on_detect(self) -> None:
-        self.config.ocr_detect = bool(self.detect_var.get())
-        self.config.save()
 
     def _on_rarity(self) -> None:
         self.config.show_rarity = bool(self.rarity_var.get())
@@ -278,7 +256,6 @@ class ControlPanel:
 
         last_fp = None  # fingerprint of the last frame we actually OCR'd
         was_enabled = self.config.enabled
-        was_detect = self.config.ocr_detect
 
         while not self.stop_event.is_set():
             start = time.time()
@@ -287,8 +264,8 @@ class ControlPanel:
                 self.overlay.update_async(None)
             elif self.config.enabled:
                 try:
-                    # Force a fresh read after re-enabling or flipping OCR mode.
-                    if not was_enabled or self.config.ocr_detect != was_detect:
+                    # Force a fresh read right after re-enabling.
+                    if not was_enabled:
                         last_fp = None
                     t0 = time.time()
                     img = capture.grab(self.config.region)
@@ -306,11 +283,7 @@ class ControlPanel:
                     else:
                         last_fp = fp
                         t1 = time.time()
-                        number = ocr.read_number(
-                            img,
-                            detect=self.config.ocr_detect,
-                            upscale=self.config.ocr_upscale,
-                        )
+                        number = ocr.read_number(img)  # detection always on
                         ocr_ms = (time.time() - t1) * 1000
                         matches = (
                             translate_matches(number, self.config.min_confidence)
@@ -337,7 +310,6 @@ class ControlPanel:
             else:
                 self._last_status = "overlay off"
             was_enabled = self.config.enabled
-            was_detect = self.config.ocr_detect
 
             period = 1.0 / max(0.5, self.config.scan_fps)
             time.sleep(max(0.0, period - (time.time() - start)))
