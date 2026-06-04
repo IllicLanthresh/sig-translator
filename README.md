@@ -38,15 +38,15 @@ No install, no dependencies, nothing to keep updated — download one `.exe` and
 
 ## Using it
 
-- Scan a rock or wreck. A label appears just below the number showing the **material**
-  (colored by rarity) and a `sig 6,770` line echoing the number it read, so you can
-  double-check at a glance.
+- Scan a rock or wreck. A label appears just below the number: the recognized signature
+  in brackets (e.g. `[ 6,770 ]`) on top, so you can double-check it matches the game, and
+  the **material** (colored by rarity) underneath.
 - Turn the overlay **on/off** with the big button in the panel or the global hotkey
   (**Ctrl+Alt+S** by default).
 - When there's no signature on screen, the overlay shows nothing.
 
-The material name is colored by its rarity tier, with the scanned signature echoed
-underneath — and it works the same in space or on a planet surface:
+The material name is colored by its rarity tier — and it works the same in space or on a
+planet surface:
 
 <p>
   <img src="screenshots/image4.png" width="280" alt="Riccite ×1 (Epic)">
@@ -63,6 +63,7 @@ underneath — and it works the same in space or on a planet surface:
 | **Accent color** | Color picker for the readout tint — match your ship manufacturer's HUD color. |
 | **Label size** | Overlay text size. |
 | **Show rarity** | Show or hide the rarity tier after the name, e.g. `Riccite ×2 (Epic)`. |
+| **Customize sigs** | Slide-out panel to show/hide individual materials (grouped by tier, with show all / none). Hidden materials show only the bracketed signature when scanned — handy for focusing on what you actually want to mine. |
 
 Settings are saved to `%APPDATA%\sig-translator\config.json` (Windows).
 
