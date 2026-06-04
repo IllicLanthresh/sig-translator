@@ -83,18 +83,22 @@ class Overlay:
                                   font=font, anchor="n")
         c.create_text(cx, y, text=text, fill=color, font=font, anchor="n")
 
-    def show_matches(self, matches, scanned: int) -> None:
+    def show_matches(self, matches, scanned: int, sig_only: bool = False) -> None:
         import tkinter.font as tkfont
 
         fam = self.config.font_family
         base = self.config.font_size
-        lines: list[tuple[str, str, int]] = []
-        for m in matches:
-            tier = m.material.tier
-            suffix = f"  ({tier})" if (self.config.show_rarity and tier in RARITY_TIERS) else ""
-            lines.append((f"{m.material.name} ×{m.count}{suffix}",
-                          TIER_COLORS.get(tier, "#ffffff"), base))
-        lines.append((f"sig {scanned:,}", self.config.accent_color, max(8, base - 6)))
+        # Recognized-signature readback first (top), bracketed so it clearly reads as
+        # "this is the number I recognized — compare it to the game", in the accent color.
+        lines: list[tuple[str, str, int]] = [
+            (f"[ {scanned:,} ]", self.config.accent_color, base)
+        ]
+        if not sig_only:
+            for m in matches:
+                tier = m.material.tier
+                suffix = f"  ({tier})" if (self.config.show_rarity and tier in RARITY_TIERS) else ""
+                lines.append((f"{m.material.name} ×{m.count}{suffix}",
+                              TIER_COLORS.get(tier, "#ffffff"), base))
 
         self._fonts = [tkfont.Font(family=fam, size=s, weight="bold") for (_, _, s) in lines]
         widths = [f.measure(t) for (t, _, _), f in zip(lines, self._fonts)]
@@ -123,10 +127,15 @@ class Overlay:
     def hide(self) -> None:
         self.win.withdraw()
 
-    def update_async(self, matches, scanned: int = 0) -> None:
-        """Thread-safe: schedule a label update on the Tk thread."""
-        if matches:
-            self.win.after(0, lambda: self.show_matches(matches, scanned))
+    def update_async(self, matches, scanned: int = 0, sig_only: bool = False) -> None:
+        """Thread-safe: schedule a label update on the Tk thread.
+
+        Shows the readout when there are matches, or when ``sig_only`` is set and a
+        signature was read (scanned a material whose name display is disabled).
+        """
+        matches = matches or []
+        if matches or (sig_only and scanned):
+            self.win.after(0, lambda: self.show_matches(matches, scanned, sig_only))
         else:
             self.win.after(0, self.hide)
 
