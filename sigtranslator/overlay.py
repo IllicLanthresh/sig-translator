@@ -83,8 +83,7 @@ class Overlay:
                                   font=font, anchor="n")
         c.create_text(cx, y, text=text, fill=color, font=font, anchor="n")
 
-    def show_matches(self, matches, scanned: int, sig_only: bool = False,
-                     targeted: bool = False) -> None:
+    def show_matches(self, matches, scanned: int, sig_only: bool = False) -> None:
         import tkinter.font as tkfont
 
         fam = self.config.font_family
@@ -97,8 +96,7 @@ class Overlay:
             for m in matches:
                 tier = m.material.tier
                 suffix = f"  ({tier})" if (self.config.show_rarity and tier in RARITY_TIERS) else ""
-                mark = "✓ " if targeted else ""
-                lines.append((f"{mark}{m.material.name} ×{m.count}{suffix}",
+                lines.append((f"{m.material.name} ×{m.count}{suffix}",
                               TIER_COLORS.get(tier, "#ffffff"), base))
 
         self._fonts = [tkfont.Font(family=fam, size=s, weight="bold") for (_, _, s) in lines]
@@ -128,18 +126,15 @@ class Overlay:
     def hide(self) -> None:
         self.win.withdraw()
 
-    def update_async(self, matches, scanned: int = 0, sig_only: bool = False,
-                     targeted: bool = False) -> None:
+    def update_async(self, matches, scanned: int = 0, sig_only: bool = False) -> None:
         """Thread-safe: schedule a label update on the Tk thread.
 
         Shows the readout when there are matches, or when ``sig_only`` is set and a
-        signature was read (targeted mode, scanned something that isn't a target).
+        signature was read (scanned a material whose name display is disabled).
         """
         matches = matches or []
         if matches or (sig_only and scanned):
-            self.win.after(
-                0, lambda: self.show_matches(matches, scanned, sig_only, targeted)
-            )
+            self.win.after(0, lambda: self.show_matches(matches, scanned, sig_only))
         else:
             self.win.after(0, self.hide)
 

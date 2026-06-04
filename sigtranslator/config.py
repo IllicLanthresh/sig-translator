@@ -67,10 +67,10 @@ class Config:
     calibrated: bool = False
     # Check GitHub for a newer release on startup (the app's only network call).
     check_updates: bool = True
-    # Targeted mining: when on, only the materials in `targets` show their name; others
-    # show just the signature readback. Empty `targets` makes targeted mode a no-op.
-    targeted_mode: bool = False
-    targets: list[str] = field(default_factory=list)
+    # Every material is shown by default. Names listed here are "disabled": when one of
+    # them is scanned the overlay shows only the signature readback (no material name),
+    # so you can focus on what you actually want to mine.
+    disabled_materials: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls) -> "Config":

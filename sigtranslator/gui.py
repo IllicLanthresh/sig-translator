@@ -41,7 +41,7 @@ class ControlPanel:
     def _build_widgets(self) -> None:
         pad = {"padx": 10, "pady": 6}
         frm = ttk.Frame(self.root, padding=12)
-        frm.grid(sticky="nsew")
+        frm.grid(row=0, column=0, sticky="nsew")
 
         row = 0
         ttk.Label(frm, text="sig-translator", font=("", 14, "bold")).grid(
@@ -72,16 +72,12 @@ class ControlPanel:
         self.toggle_btn.grid(row=row, column=0, columnspan=2, sticky="ew", **pad)
         self._refresh_toggle()
 
-        # Targeted mode: only flag the materials you care about
+        # Customize sigs: slide-out panel to show/hide individual materials
         row += 1
-        self.targeted_var = tk.BooleanVar(value=self.config.targeted_mode)
-        ttk.Checkbutton(
-            frm, text="Targeted mode", variable=self.targeted_var,
-            command=self._on_targeted,
-        ).grid(row=row, column=0, sticky="w", **pad)
-        ttk.Button(frm, text="Targets…", command=self._open_targets).grid(
-            row=row, column=1, sticky="w", **pad
+        self.customize_btn = ttk.Button(
+            frm, text="Customize sigs  ▸", command=self._toggle_side
         )
+        self.customize_btn.grid(row=row, column=0, columnspan=2, sticky="w", **pad)
 
         # Scan FPS
         row += 1
@@ -153,9 +149,96 @@ class ControlPanel:
             row=row, column=0, columnspan=2, sticky="w", **pad
         )
 
+        self._build_side()
+
     def _region_text(self) -> str:
         r = self.config.region
         return f"{r.width}×{r.height} @ ({r.x},{r.y})"
+
+    # ------------------------------------------------------- customize sigs panel
+    def _build_side(self) -> None:
+        """Collapsible side panel: a per-material show/hide checklist by tier."""
+        from .materials import MATERIALS, TIER_COLORS
+
+        self._side_open = False
+        self.side = ttk.Frame(self.root, padding=(0, 12, 12, 12))
+        self.side.grid(row=0, column=1, sticky="nsew")
+
+        ttk.Label(self.side, text="Show / hide materials", font=("", 11, "bold")).pack(
+            anchor="w"
+        )
+        ttk.Button(self.side, text="Show all (default)", command=self._reset_materials).pack(
+            anchor="w", pady=(2, 6)
+        )
+
+        canvas = tk.Canvas(self.side, width=250, height=430, highlightthickness=0)
+        scroll = ttk.Scrollbar(self.side, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        self._side_canvas = canvas
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", self._side_wheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
+        disabled = set(self.config.disabled_materials)
+        self.mat_vars: dict[str, tk.BooleanVar] = {}
+        groups: dict[str, list] = {}
+        for m in MATERIALS:
+            groups.setdefault(m.tier, []).append(m)
+        for tier, mats in groups.items():
+            header = ttk.Frame(inner)
+            header.pack(fill="x", pady=(8, 2))
+            ttk.Label(header, text=tier, font=("", 9, "bold")).pack(side="left")
+            ttk.Button(header, text="none", width=5,
+                       command=lambda t=tier: self._set_tier(t, False)).pack(side="right")
+            ttk.Button(header, text="all", width=4,
+                       command=lambda t=tier: self._set_tier(t, True)).pack(side="right", padx=4)
+            for m in mats:
+                rowf = ttk.Frame(inner)
+                rowf.pack(fill="x", anchor="w")
+                tk.Label(rowf, bg=TIER_COLORS.get(m.tier, "#888888"), width=2).pack(
+                    side="left", padx=(2, 6)
+                )
+                var = tk.BooleanVar(value=m.name not in disabled)  # checked = shown
+                self.mat_vars[m.name] = var
+                ttk.Checkbutton(rowf, text=m.name, variable=var,
+                                command=self._save_materials).pack(side="left")
+
+        self.side.grid_remove()  # hidden until "Customize sigs" is clicked
+
+    def _toggle_side(self) -> None:
+        if self._side_open:
+            self.side.grid_remove()
+            self.customize_btn.configure(text="Customize sigs  ▸")
+        else:
+            self.side.grid()
+            self.customize_btn.configure(text="Customize sigs  ◂")
+        self._side_open = not self._side_open
+
+    def _side_wheel(self, event) -> None:
+        self._side_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _set_tier(self, tier: str, value: bool) -> None:
+        from .materials import MATERIALS
+
+        for m in MATERIALS:
+            if m.tier == tier:
+                self.mat_vars[m.name].set(value)
+        self._save_materials()
+
+    def _reset_materials(self) -> None:
+        for var in self.mat_vars.values():
+            var.set(True)
+        self._save_materials()
+
+    def _save_materials(self) -> None:
+        self.config.disabled_materials = [
+            name for name, v in self.mat_vars.items() if not v.get()
+        ]
+        self.config.save()
 
     # ----------------------------------------------------------------- events
     def _refresh_toggle(self) -> None:
@@ -204,15 +287,6 @@ class ControlPanel:
     def _on_rarity(self) -> None:
         self.config.show_rarity = bool(self.rarity_var.get())
         self.config.save()
-
-    def _on_targeted(self) -> None:
-        self.config.targeted_mode = bool(self.targeted_var.get())
-        self.config.save()
-
-    def _open_targets(self) -> None:
-        from .targets_window import TargetsWindow
-
-        TargetsWindow(self.root, self.config)
 
     def _on_accent(self) -> None:
         from tkinter import colorchooser
@@ -347,24 +421,18 @@ class ControlPanel:
                             if number else []
                         )
                         timing = f"(cap {cap_ms:.0f}ms, ocr {ocr_ms:.0f}ms)"
-                        targeting = self.config.targeted_mode and bool(self.config.targets)
+                        disabled = set(self.config.disabled_materials)
+                        active = [m for m in matches if m.material.name not in disabled]
                         if not matches:
                             self.overlay.update_async(None)
                             self._last_status = f"{number or '—'} (no match)  {timing}"
-                        elif targeting:
-                            wanted = set(self.config.targets)
-                            keep = [m for m in matches if m.material.name in wanted]
-                            if keep:
-                                self.overlay.update_async(keep, number, targeted=True)
-                                shown = " / ".join(f"{m.material.name}×{m.count}" for m in keep)
-                                self._last_status = f"{number} → ✓ {shown}  {timing}"
-                            else:
-                                self.overlay.update_async([], number, sig_only=True, targeted=True)
-                                self._last_status = f"{number} (not a target)  {timing}"
-                        else:
-                            self.overlay.update_async(matches, number)
-                            shown = " / ".join(f"{m.material.name}×{m.count}" for m in matches)
+                        elif active:
+                            self.overlay.update_async(active, number)
+                            shown = " / ".join(f"{m.material.name}×{m.count}" for m in active)
                             self._last_status = f"{number} → {shown}  {timing}"
+                        else:
+                            self.overlay.update_async([], number, sig_only=True)
+                            self._last_status = f"{number} (hidden)  {timing}"
                 except Exception as exc:
                     self._last_status = f"loop error: {exc}"
                     self.overlay.update_async(None)
