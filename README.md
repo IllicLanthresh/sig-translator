@@ -66,6 +66,10 @@ underneath — and it works the same in space or on a planet surface:
 
 Settings are saved to `%APPDATA%\sig-translator\config.json` (Windows).
 
+On startup the app makes one optional, fail-silent check to GitHub for a newer release
+and, if there is one, shows a clickable notice in the panel. It never downloads or
+installs anything; set `"check_updates": false` in `config.json` to turn it off.
+
 ROC / FPS / Salvage deposits share some signature values (e.g. `18,000` could be
 **FPS ×6** *or* **Salvage ×9**); when a number is genuinely shared, the overlay always
 shows every valid reading so you can decide.

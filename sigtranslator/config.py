@@ -65,6 +65,8 @@ class Config:
     # Set once the user has calibrated the capture box. Until then the app insists on
     # calibration and won't scan a meaningless default region.
     calibrated: bool = False
+    # Check GitHub for a newer release on startup (the app's only network call).
+    check_updates: bool = True
 
     @classmethod
     def load(cls) -> "Config":

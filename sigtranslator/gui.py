@@ -35,6 +35,7 @@ class ControlPanel:
         self._register_hotkey()
         self._start_worker()
         self._poll_status()
+        self._start_update_check()
 
     # ---------------------------------------------------------------- widgets
     def _build_widgets(self) -> None:
@@ -46,6 +47,17 @@ class ControlPanel:
         ttk.Label(frm, text="sig-translator", font=("", 14, "bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", **pad
         )
+
+        # Update notice — hidden unless a newer release is found; click to open Releases.
+        row += 1
+        self.update_var = tk.StringVar(value="")
+        self.update_lbl = tk.Label(
+            frm, textvariable=self.update_var, fg="#ffcc44",
+            cursor="hand2", font=("", 10, "bold"),
+        )
+        self.update_lbl.grid(row=row, column=0, columnspan=2, sticky="w", **pad)
+        self.update_lbl.grid_remove()
+        self.update_lbl.bind("<Button-1>", lambda _e: self._open_releases())
 
         # On/off button (big, color-coded; mirrors the global hotkey)
         row += 1
@@ -192,6 +204,31 @@ class ControlPanel:
             self.config.accent_color = hex_color
             self.config.save()
             self.accent_swatch.configure(bg=hex_color)
+
+    # ----------------------------------------------------------- update check
+    def _start_update_check(self) -> None:
+        if not self.config.check_updates:
+            return
+
+        def worker():
+            from .update import check_for_update
+
+            tag = check_for_update(__version__)
+            if tag:
+                self.root.after(0, lambda: self._set_update_available(tag))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _set_update_available(self, tag: str) -> None:
+        self.update_var.set(f"⬆ New version {tag} available — click to download")
+        self.update_lbl.grid()
+
+    def _open_releases(self) -> None:
+        import webbrowser
+
+        from .update import RELEASES_URL
+
+        webbrowser.open(RELEASES_URL)
 
     # ----------------------------------------------------------------- hotkey
     def _register_hotkey(self) -> None:
