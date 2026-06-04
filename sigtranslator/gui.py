@@ -167,8 +167,13 @@ class ControlPanel:
         ttk.Label(self.side, text="Show / hide materials", font=("", 11, "bold")).pack(
             anchor="w"
         )
-        ttk.Button(self.side, text="Show all (default)", command=self._reset_materials).pack(
-            anchor="w", pady=(2, 6)
+        btns = ttk.Frame(self.side)
+        btns.pack(anchor="w", pady=(2, 6))
+        ttk.Button(btns, text="Show all", width=10, command=self._reset_materials).pack(
+            side="left"
+        )
+        ttk.Button(btns, text="Show none", width=10, command=self._hide_all_materials).pack(
+            side="left", padx=(6, 0)
         )
 
         canvas = tk.Canvas(self.side, width=250, height=430, highlightthickness=0)
@@ -232,6 +237,11 @@ class ControlPanel:
     def _reset_materials(self) -> None:
         for var in self.mat_vars.values():
             var.set(True)
+        self._save_materials()
+
+    def _hide_all_materials(self) -> None:
+        for var in self.mat_vars.values():
+            var.set(False)
         self._save_materials()
 
     def _save_materials(self) -> None:
