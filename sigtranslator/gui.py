@@ -72,6 +72,17 @@ class ControlPanel:
         self.toggle_btn.grid(row=row, column=0, columnspan=2, sticky="ew", **pad)
         self._refresh_toggle()
 
+        # Targeted mode: only flag the materials you care about
+        row += 1
+        self.targeted_var = tk.BooleanVar(value=self.config.targeted_mode)
+        ttk.Checkbutton(
+            frm, text="Targeted mode", variable=self.targeted_var,
+            command=self._on_targeted,
+        ).grid(row=row, column=0, sticky="w", **pad)
+        ttk.Button(frm, text="Targets…", command=self._open_targets).grid(
+            row=row, column=1, sticky="w", **pad
+        )
+
         # Scan FPS
         row += 1
         ttk.Label(frm, text="Scan FPS").grid(row=row, column=0, sticky="w", **pad)
@@ -193,6 +204,15 @@ class ControlPanel:
     def _on_rarity(self) -> None:
         self.config.show_rarity = bool(self.rarity_var.get())
         self.config.save()
+
+    def _on_targeted(self) -> None:
+        self.config.targeted_mode = bool(self.targeted_var.get())
+        self.config.save()
+
+    def _open_targets(self) -> None:
+        from .targets_window import TargetsWindow
+
+        TargetsWindow(self.root, self.config)
 
     def _on_accent(self) -> None:
         from tkinter import colorchooser
@@ -326,21 +346,25 @@ class ControlPanel:
                             translate_matches(number, self.config.min_confidence)
                             if number else []
                         )
-                        if matches:
-                            self.overlay.update_async(matches, number)
-                            shown = " / ".join(
-                                f"{m.material.name}×{m.count}" for m in matches
-                            )
-                            self._last_status = (
-                                f"{number} → {shown}  "
-                                f"(cap {cap_ms:.0f}ms, ocr {ocr_ms:.0f}ms)"
-                            )
-                        else:
+                        timing = f"(cap {cap_ms:.0f}ms, ocr {ocr_ms:.0f}ms)"
+                        targeting = self.config.targeted_mode and bool(self.config.targets)
+                        if not matches:
                             self.overlay.update_async(None)
-                            self._last_status = (
-                                f"{number or '—'} (no match)  "
-                                f"(cap {cap_ms:.0f}ms, ocr {ocr_ms:.0f}ms)"
-                            )
+                            self._last_status = f"{number or '—'} (no match)  {timing}"
+                        elif targeting:
+                            wanted = set(self.config.targets)
+                            keep = [m for m in matches if m.material.name in wanted]
+                            if keep:
+                                self.overlay.update_async(keep, number, targeted=True)
+                                shown = " / ".join(f"{m.material.name}×{m.count}" for m in keep)
+                                self._last_status = f"{number} → ✓ {shown}  {timing}"
+                            else:
+                                self.overlay.update_async([], number, sig_only=True, targeted=True)
+                                self._last_status = f"{number} (not a target)  {timing}"
+                        else:
+                            self.overlay.update_async(matches, number)
+                            shown = " / ".join(f"{m.material.name}×{m.count}" for m in matches)
+                            self._last_status = f"{number} → {shown}  {timing}"
                 except Exception as exc:
                     self._last_status = f"loop error: {exc}"
                     self.overlay.update_async(None)
