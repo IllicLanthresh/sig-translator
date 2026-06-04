@@ -88,9 +88,10 @@ class Overlay:
 
         fam = self.config.font_family
         base = self.config.font_size
-        # Signature readback first (top), prominent in the accent color.
+        # Recognized-signature readback first (top), bracketed so it clearly reads as
+        # "this is the number I recognized — compare it to the game", in the accent color.
         lines: list[tuple[str, str, int]] = [
-            (f"SIG {scanned:,}", self.config.accent_color, base)
+            (f"[ {scanned:,} ]", self.config.accent_color, base)
         ]
         if not sig_only:
             for m in matches:
