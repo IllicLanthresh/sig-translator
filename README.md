@@ -19,7 +19,7 @@ No install, no dependencies, nothing to keep updated — download one `.exe` and
 2. Run it. The first time, Windows SmartScreen may say *"Windows protected your PC /
    unknown publisher."* That's only because the app isn't code-signed (it costs money
    to sign a hobby tool). Click **More info → Run anyway**. See
-   [Is this safe?](#is-this-safe-eac--bans) below.
+   [What it does](#what-it-does-and-what-it-doesnt-do) below.
 
 ## Setup (once)
 
@@ -75,16 +75,26 @@ ROC / FPS / Salvage deposits share some signature values (e.g. `18,000` could be
 **FPS ×6** *or* **Salvage ×9**); when a number is genuinely shared, the overlay always
 shows every valid reading so you can decide.
 
-## Is this safe? (EAC / bans)
+## What it does (and what it doesn't do)
 
-This tool is designed to be as low-risk as possible: it never touches, injects into, or
-reads the game itself. It only takes a read-only screenshot of a small part of your
-**desktop** — the same thing OBS and screenshot tools do — and draws a separate window
-on top, so EasyAntiCheat doesn't interact with it in any way. It only surfaces
-information that's already on your own screen. That said, it's an unofficial third-party
-tool, and CIG's EULA gives them broad discretion over what they allow, so — as with any
-community overlay, calculator, or trade app — use it at your own discretion. If you want
-absolute certainty, CIG is always the final word.
+sig-translator is a read-only reference overlay. It reads the signature number that's
+already on your screen and looks up the matching material from a built-in table — the
+same lookup you could do by hand from a community chart. It's deliberately built to stay
+entirely outside the game:
+
+- It does **not** modify, inject into, hook, or read the game or its memory, and does
+  **not** touch any game files.
+- It does **not** automate or perform any gameplay action — you scan, fly, and mine
+  exactly as you would without it.
+- It captures a small region of your **desktop** image (the way OBS or a screenshot tool
+  does) and draws its label in a separate window. Nothing connects to or communicates
+  with Star Citizen.
+- It offers no mechanical advantage — it only saves a manual chart lookup of information
+  that's already visible on your screen.
+
+It's an unofficial, community-made tool, and **Cloud Imperium's rules are the final
+word.** If CIG's position is that a tool like this isn't welcome, we'll follow their
+guidance.
 
 ## Troubleshooting
 
