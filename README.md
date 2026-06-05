@@ -19,7 +19,7 @@ No install and no dependencies. Download one `.exe` and run it.
 2. Run it. The first time, Windows SmartScreen may say *"Windows protected your PC /
    unknown publisher."* That just means the app isn't code-signed (signing a hobby tool
    costs money). Click **More info**, then **Run anyway**. See
-   [What it does](#what-it-does-and-what-it-doesnt-do) below.
+   [Is this safe to use?](#is-this-safe-to-use) below.
 
 ## Setup (once)
 
@@ -76,7 +76,7 @@ ROC, FPS and Salvage deposits share some signature values (for example `18,000` 
 **FPS ×6** or **Salvage ×9**). When a number is genuinely shared, the overlay shows every
 valid reading so you can decide.
 
-## What it does (and what it doesn't do)
+## Is this safe to use?
 
 sig-translator is a read-only reference overlay. It reads the signature number that's
 already on your screen and looks up the matching material from a built-in table, the same
