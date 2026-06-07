@@ -38,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sig-translator", description=__doc__)
     parser.add_argument("--version", action="version", version=f"sig-translator {__version__}")
     parser.add_argument("--snapshot", action="store_true", help="save a PNG of the capture region and exit")
+    parser.add_argument("--legacy", action="store_true", help="launch the old Tkinter UI")
     args = parser.parse_args(argv)
 
     config = Config.load()
@@ -46,10 +47,15 @@ def main(argv: list[str] | None = None) -> int:
         cmd_snapshot(config)
         return 0
 
-    from .gui import ControlPanel
+    if args.legacy:
+        from .gui import ControlPanel
 
-    ControlPanel(config).run()
-    return 0
+        ControlPanel(config).run()
+        return 0
+
+    from .ui.app import run  # new Qt UI
+
+    return run()
 
 
 if __name__ == "__main__":
