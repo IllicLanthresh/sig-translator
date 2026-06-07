@@ -140,6 +140,81 @@ class Overlay:
             self.win.after(0, self.hide)
 
 
+class MiningOverlay:
+    """Floating breakability readout, anchored just ABOVE the rock-panel capture box.
+
+    Rendered like the signature overlay (transparent, click-through, outlined text),
+    but fed pre-formatted (text, color) lines by the worker so it stays dumb.
+    """
+
+    _SHADOW = "#001218"
+
+    def __init__(self, master: tk.Misc, config: Config) -> None:
+        self.config = config
+        self.win = tk.Toplevel(master)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        try:
+            self.win.attributes("-transparentcolor", _TRANSPARENT_KEY)
+        except tk.TclError:
+            pass
+        self.win.configure(bg=_TRANSPARENT_KEY)
+        self.canvas = tk.Canvas(self.win, bg=_TRANSPARENT_KEY, highlightthickness=0, bd=0)
+        self.canvas.pack()
+        self._fonts: list = []
+        self.win.withdraw()
+        self.win.update_idletasks()
+        _make_click_through(self.win)
+
+    def _outlined(self, cx, y, text, color, font) -> None:
+        c = self.canvas
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx or dy:
+                    c.create_text(cx + dx, y + dy, text=text, fill=self._SHADOW,
+                                  font=font, anchor="n")
+        c.create_text(cx, y, text=text, fill=color, font=font, anchor="n")
+
+    def show_lines(self, lines: list[tuple[str, str]]) -> None:
+        import tkinter.font as tkfont
+
+        fam = self.config.font_family
+        base = max(11, self.config.font_size - 2)
+        self._fonts = [tkfont.Font(family=fam, size=base, weight="bold") for _ in lines]
+        widths = [f.measure(t) for (t, _), f in zip(lines, self._fonts)]
+        heights = [f.metrics("linespace") for f in self._fonts]
+        pad = 6
+        total_w = (max(widths) if widths else 10) + pad * 2 + 4
+        total_h = sum(heights) + pad * 2 + (len(lines) - 1) * 2
+
+        c = self.canvas
+        c.delete("all")
+        c.configure(width=total_w, height=total_h)
+        cx = total_w // 2
+        y = pad
+        for (text, color), f, h in zip(lines, self._fonts, heights):
+            self._outlined(cx, y, text, color, f)
+            y += h + 2
+
+        r = self.config.rock_region
+        x = r.x + r.width // 2
+        wy = r.y - total_h - 4  # ABOVE the rock box
+        self.win.deiconify()
+        self.win.update_idletasks()
+        self.win.geometry(f"{total_w}x{total_h}+{max(0, x - total_w // 2)}+{max(0, wy)}")
+        self.win.lift()
+
+    def hide(self) -> None:
+        self.win.withdraw()
+
+    def update_async(self, lines) -> None:
+        """Thread-safe: schedule a redraw (or hide if lines is falsy)."""
+        if lines:
+            self.win.after(0, lambda: self.show_lines(lines))
+        else:
+            self.win.after(0, self.hide)
+
+
 # Resize-handle layout: handle name -> which box sides it moves.
 _HANDLE_SIDES = {
     "nw": ("l", "t"), "n": ("t",), "ne": ("r", "t"),
@@ -158,9 +233,10 @@ _HANDLE_HIT = 11  # px tolerance for grabbing a handle
 class _Calibrator:
     """Fullscreen movable/resizable selection box for choosing the capture region."""
 
-    def __init__(self, master: tk.Misc, config: Config) -> None:
+    def __init__(self, master: tk.Misc, config: Config, initial: Region | None = None) -> None:
         self.config = config
         self.result: Region | None = None
+        initial = initial if initial is not None else config.region
 
         self.top = tk.Toplevel(master)
         self.top.attributes("-topmost", True)
@@ -200,7 +276,7 @@ class _Calibrator:
 
         # Start from the current region (converted to window-local coords), or a
         # sensible default centered on the desktop if never calibrated.
-        r = config.region
+        r = initial
         if r.width < _MIN_SIZE or r.height < _MIN_SIZE or (r.x == 0 and r.y == 0):
             w, h = 420, 90
             cx = (self.sw - w) // 2
@@ -364,15 +440,22 @@ class _Calibrator:
         self.top.destroy()
 
 
-def calibrate_region(master: tk.Misc, config: Config) -> Region:
-    """Show a movable/resizable selection box; save the chosen region to config."""
-    cal = _Calibrator(master, config)
+def calibrate_region(
+    master: tk.Misc, config: Config, attr: str = "region",
+    calibrated_attr: str = "calibrated",
+) -> Region:
+    """Show a movable/resizable selection box; save the chosen region to config.
+
+    `attr` chooses which config region to edit ("region" for the signature box,
+    "rock_region" for the mining scan panel).
+    """
+    cal = _Calibrator(master, config, getattr(config, attr))
     master.wait_window(cal.top)
     if cal.result and cal.result.width >= _MIN_SIZE and cal.result.height >= _MIN_SIZE:
-        config.region = cal.result
-        config.calibrated = True
+        setattr(config, attr, cal.result)
+        setattr(config, calibrated_attr, True)
         config.save()
-        print(f"[calibrate] saved region: {config.region}")
+        print(f"[calibrate] saved {attr}: {getattr(config, attr)}")
     else:
         print("[calibrate] cancelled; region unchanged")
-    return config.region
+    return getattr(config, attr)

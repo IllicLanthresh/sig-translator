@@ -71,6 +71,12 @@ class Config:
     # them is scanned the overlay shows only the signature readback (no material name),
     # so you can focus on what you actually want to mine.
     disabled_materials: list[str] = field(default_factory=list)
+    # --- Mining breakability (separate capability) ---
+    mining_enabled: bool = False
+    rock_region: Region = field(default_factory=Region)  # 2nd capture box, the scan panel
+    rock_calibrated: bool = False
+    # Loadout: up to 3 turrets, each {"laser": <key>, "modules": [<key>, ...]}.
+    loadout: list = field(default_factory=list)
 
     @classmethod
     def load(cls) -> "Config":
@@ -78,14 +84,17 @@ class Config:
             try:
                 raw = json.loads(CONFIG_PATH.read_text())
                 region_fields = {f.name for f in fields(Region)}
-                region_raw = {
-                    k: v for k, v in raw.pop("region", {}).items() if k in region_fields
-                }
-                region = Region(**region_raw)
+
+                def _region(key):
+                    return Region(**{k: v for k, v in raw.pop(key, {}).items()
+                                     if k in region_fields})
+
+                region = _region("region")
+                rock_region = _region("rock_region")
                 # Ignore unknown/removed keys so old config files keep loading.
-                known = {f.name for f in fields(cls)} - {"region"}
+                known = {f.name for f in fields(cls)} - {"region", "rock_region"}
                 raw = {k: v for k, v in raw.items() if k in known}
-                return cls(region=region, **raw)
+                return cls(region=region, rock_region=rock_region, **raw)
             except Exception as exc:  # corrupt config -> fall back to defaults
                 print(f"[config] could not read {CONFIG_PATH}: {exc}; using defaults")
         cfg = cls()

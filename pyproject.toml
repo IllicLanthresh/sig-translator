@@ -1,6 +1,6 @@
 [project]
 name = "sig-translator"
-version = "0.1.13"
+version = "0.1.14"
 description = "Star Citizen mining/salvage signature -> material overlay"
 readme = "README.md"
 requires-python = ">=3.11"

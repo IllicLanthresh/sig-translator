@@ -98,3 +98,18 @@ class DigitOCR:
             img, use_det=detect, use_cls=False, use_rec=True
         )
         return _extract_number(result)
+
+    def read_text(self, img: np.ndarray) -> str:
+        """Full detect+recognize, returning all recognized text joined by spaces.
+
+        Used for the multi-field rock scan panel (Mass / Resistance / Instability),
+        which is then regex-parsed by sigtranslator.mining.parse_rock_stats.
+        """
+        result, _elapse = self._engine(img, use_det=True, use_cls=False, use_rec=True)
+        if not result:
+            return ""
+        parts = []
+        for row in result:
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                parts.append(str(row[-2]))
+        return " ".join(parts)

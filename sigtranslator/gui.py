@@ -15,7 +15,7 @@ from tkinter import ttk
 
 from . import __version__
 from .config import Config
-from .overlay import Overlay, calibrate_region
+from .overlay import MiningOverlay, Overlay, calibrate_region
 
 
 class ControlPanel:
@@ -31,6 +31,7 @@ class ControlPanel:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.overlay = Overlay(self.root, config)
+        self.mining_overlay = MiningOverlay(self.root, config)
         self._build_widgets()
         self._register_hotkey()
         self._start_worker()
@@ -78,6 +79,17 @@ class ControlPanel:
             frm, text="Customize sigs  ▸", command=self._toggle_side
         )
         self.customize_btn.grid(row=row, column=0, columnspan=2, sticky="w", **pad)
+
+        # Mining breakability (separate capability)
+        row += 1
+        self.mining_var = tk.BooleanVar(value=self.config.mining_enabled)
+        ttk.Checkbutton(
+            frm, text="Mining mode (rock breakability)", variable=self.mining_var,
+            command=self._on_mining,
+        ).grid(row=row, column=0, sticky="w", **pad)
+        ttk.Button(frm, text="Mining setup…", command=self._open_mining_setup).grid(
+            row=row, column=1, sticky="w", **pad
+        )
 
         # Scan FPS
         row += 1
@@ -298,6 +310,17 @@ class ControlPanel:
         self.config.show_rarity = bool(self.rarity_var.get())
         self.config.save()
 
+    def _on_mining(self) -> None:
+        self.config.mining_enabled = bool(self.mining_var.get())
+        self.config.save()
+        if not self.config.mining_enabled:
+            self.mining_overlay.update_async(None)
+
+    def _open_mining_setup(self) -> None:
+        from .mining_window import MiningSetupWindow
+
+        MiningSetupWindow(self.root, self.config)
+
     def _on_accent(self) -> None:
         from tkinter import colorchooser
 
@@ -381,6 +404,7 @@ class ControlPanel:
 
         try:
             from .capture import Capture
+            from .mining import analyze, parse_rock_stats, turrets_from_loadout
             from .ocr import DigitOCR
             from .translate import translate_matches
         except Exception as exc:
@@ -396,6 +420,7 @@ class ControlPanel:
         self._last_status = "ready"
 
         last_fp = None  # fingerprint of the last frame we actually OCR'd
+        last_rfp = None  # same, for the rock (mining) box
         was_enabled = self.config.enabled
 
         while not self.stop_event.is_set():
@@ -450,10 +475,47 @@ class ControlPanel:
                 self._last_status = "overlay off"
             was_enabled = self.config.enabled
 
+            # --- mining breakability (independent of the signature loop) ---
+            if (self.config.mining_enabled and self.config.rock_calibrated
+                    and self.config.loadout):
+                try:
+                    rimg = capture.grab(self.config.rock_region)
+                    rfp = self._frame_fingerprint(rimg)
+                    if (self.config.skip_unchanged and last_rfp is not None
+                            and last_rfp.shape == rfp.shape
+                            and float(np.abs(rfp - last_rfp).mean()) < 2.0):
+                        pass  # rock panel unchanged -> keep the current readout
+                    else:
+                        last_rfp = rfp
+                        rock = parse_rock_stats(ocr.read_text(rimg))
+                        if rock:
+                            turrets = turrets_from_loadout(self.config.loadout)
+                            analysis = analyze(rock, turrets)
+                            self.mining_overlay.update_async(self._mining_lines(analysis))
+                        else:
+                            self.mining_overlay.update_async(None)
+                except Exception as exc:
+                    self.mining_overlay.update_async(None)
+                    print(f"[mining] loop error: {exc}")
+            else:
+                self.mining_overlay.update_async(None)
+                last_rfp = None
+
             period = 1.0 / max(0.5, self.config.scan_fps)
             time.sleep(max(0.0, period - (time.time() - start)))
 
         capture.close()
+
+    def _mining_lines(self, analysis):
+        rock = analysis.rock
+        acc = self.config.accent_color
+        lines = [(f"[ {int(round(rock.mass))} m · {rock.resistance:.0f}% ]", acc)]
+        colors = {"ok": "#33dd66", "overpower": "#ffcc44", "cant": "#ff5555"}
+        labels = {"ok": "controllable", "overpower": "too much power", "cant": "can't break"}
+        for v in analysis.verdicts:
+            lines.append((f"{v.name} — {labels[v.state]}", colors.get(v.state, "#ffffff")))
+        lines.append((f"→ {analysis.recommendation}", "#e8e8e8"))
+        return lines
 
     def _poll_status(self) -> None:
         self.status_var.set(self._last_status)
