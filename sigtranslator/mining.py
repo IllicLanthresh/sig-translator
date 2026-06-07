@@ -207,86 +207,113 @@ def turret_verdict(rock: RockStats, t: Turret) -> TurretVerdict:
     return TurretVerdict(turret=t, required=req, state=state)
 
 
+# Role colors (kept with the logic so the overlay stays a dumb renderer).
+GREEN = "#33dd66"   # use / part of the breaking combo
+YELLOW = "#ffe24d"  # the control laser in a combo
+AMBER = "#ffcc44"   # too much power (overshoots, must pulse)
+GREY = "#9aa0a6"    # not needed for the plan
+RED = "#ff5555"     # can't break, even combined
+
+
 @dataclass
-class ComboPlan:
-    turrets: list[Turret]          # the subset used
-    control_index: int             # index (in `turrets`) of the control laser
-    required: float
-    controllable: bool             # required sits inside the achievable power band
+class TurretRole:
+    name: str
+    power_max: float
+    role: str         # short word for the line ("use", "@100%", "control", ...)
+    color: str
+    headroom: float | None = None  # power - required, for "use" lines
+
+
+@dataclass
+class Plan:
+    rock: RockStats
+    kind: str            # "single" | "pulse" | "combo" | "impossible"
+    required: float      # operative requirement for the chosen plan
+    power: float         # operative available power for the chosen plan
+    roles: list[TurretRole]
 
     @property
-    def total_max(self) -> float:
-        return sum(t.power_max for t in self.turrets)
+    def headroom(self) -> float:
+        return self.power - self.required
 
 
-def _combo_required(mass: float, resistance: float, turrets: list[Turret]) -> float:
-    # Conservative cross-laser resistance assumption: use the single best (most
-    # negative) resistance reduction in the subset, not multiplicative stacking
-    # (the stacking rule is the pre-4.7 uncertain bit — refine with in-game tests).
-    best_resist = min(t.resist_mod for t in turrets)
-    return required_power(mass, resistance, best_resist)
+def _best_subset_indices(rock: RockStats, turrets: list[Turret], min_size: int):
+    """Smallest subset (>= min_size) whose combined max power breaks the rock.
 
-
-def min_break_combo(rock: RockStats, turrets: list[Turret]) -> ComboPlan | None:
-    """Smallest subset of turrets whose combined power can break the rock.
-
-    Strategy (per the in-game technique): pin the stronger lasers at max and use the
-    lowest-floor laser as the throttle 'control'. Returns the smallest such subset
-    (fewest turrets, then highest margin), or None if even all turrets can't break it.
+    Conservative cross-laser resistance: use the single best (most negative) resistance
+    reduction in the subset, not multiplicative stacking (the pre-4.7 uncertain bit).
+    Returns (indices, required, total) or None.
     """
     from itertools import combinations
 
-    best: ComboPlan | None = None
-    n = len(turrets)
-    for size in range(1, n + 1):
-        for subset in combinations(turrets, size):
-            subset = list(subset)
-            req = _combo_required(rock.mass, rock.resistance, subset)
-            total_max = sum(t.power_max for t in subset)
-            if total_max < req:
+    idxs = list(range(len(turrets)))
+    for size in range(max(1, min_size), len(turrets) + 1):
+        best = None
+        for subset in combinations(idxs, size):
+            sub = [turrets[i] for i in subset]
+            req = required_power(rock.mass, rock.resistance, min(t.resist_mod for t in sub))
+            total = sum(t.power_max for t in sub)
+            if total < req:
                 continue
-            # control = lowest min-power laser; the rest are pinned at max.
-            ctrl = min(range(len(subset)), key=lambda i: subset[i].power_min)
-            pinned_max = sum(t.power_max for i, t in enumerate(subset) if i != ctrl)
-            band_min = pinned_max + subset[ctrl].power_min
-            controllable = band_min <= req <= total_max
-            plan = ComboPlan(subset, ctrl, req, controllable)
-            if best is None or size < len(best.turrets) or (
-                size == len(best.turrets) and (total_max - req) > (best.total_max - best.required)
-            ):
-                best = plan
+            margin = total - req
+            if best is None or margin > best[2]:
+                best = (list(subset), req, margin, total)
         if best is not None:
-            break  # smallest size found
-    return best
+            return best[0], best[1], best[3]
+    return None
 
 
-@dataclass
-class LoadoutAnalysis:
-    rock: RockStats
-    verdicts: list[TurretVerdict]
-    combo: ComboPlan | None
-    recommendation: str
+def plan(rock: RockStats, turrets: list[Turret]) -> Plan:
+    """Assign each turret a role (and color) for breaking this rock.
 
-
-def analyze(rock: RockStats, turrets: list[Turret]) -> LoadoutAnalysis:
+    Order of preference: a controllable single, else a single that breaks but
+    overpowers (pulse), else the smallest multi-laser combo (pin the strong lasers,
+    use the lowest-floor one as control), else impossible.
+    """
     verdicts = [turret_verdict(rock, t) for t in turrets]
-    combo = min_break_combo(rock, turrets)
-    rec = _recommend(verdicts, combo)
-    return LoadoutAnalysis(rock=rock, verdicts=verdicts, combo=combo, recommendation=rec)
+    roles = [TurretRole(v.name, v.turret.power_max, "", GREY) for v in verdicts]
+
+    ok = [i for i, v in enumerate(verdicts) if v.state == "ok"]
+    over = [i for i, v in enumerate(verdicts) if v.state == "overpower"]
+
+    if ok:  # at least one turret breaks it controllably on its own
+        for i, v in enumerate(verdicts):
+            if v.state == "ok":
+                roles[i] = TurretRole(v.name, v.turret.power_max, "use", GREEN,
+                                      v.turret.power_max - v.required)
+            elif v.state == "overpower":
+                roles[i] = TurretRole(v.name, v.turret.power_max, "too much power", AMBER)
+            else:
+                roles[i] = TurretRole(v.name, v.turret.power_max, "not needed", GREY)
+        best = max(ok, key=lambda i: verdicts[i].turret.power_max - verdicts[i].required)
+        return Plan(rock, "single", verdicts[best].required, verdicts[best].turret.power_max, roles)
+
+    if over:  # breaks alone but overshoots -> pulse the weakest one
+        for i, v in enumerate(verdicts):
+            if v.state == "overpower":
+                roles[i] = TurretRole(v.name, v.turret.power_max, "too much power (pulse)", AMBER)
+            else:
+                roles[i] = TurretRole(v.name, v.turret.power_max, "not needed", GREY)
+        weakest = min(over, key=lambda i: verdicts[i].turret.power_min)
+        return Plan(rock, "pulse", verdicts[weakest].required, verdicts[weakest].turret.power_max, roles)
+
+    combo = _best_subset_indices(rock, turrets, min_size=2)
+    if combo:
+        indices, req, total = combo
+        ctrl = min(indices, key=lambda i: turrets[i].power_min)  # lowest floor = control
+        for i in range(len(turrets)):
+            if i == ctrl:
+                roles[i] = TurretRole(verdicts[i].name, turrets[i].power_max, "control", YELLOW)
+            elif i in indices:
+                roles[i] = TurretRole(verdicts[i].name, turrets[i].power_max, "@100%", GREEN)
+            else:
+                roles[i] = TurretRole(verdicts[i].name, turrets[i].power_max, "spare", GREY)
+        return Plan(rock, "combo", req, total, roles)
+
+    for i, v in enumerate(verdicts):  # nothing, even combined, can break it
+        roles[i] = TurretRole(v.name, v.turret.power_max, "can't break", RED)
+    return Plan(rock, "impossible", float("inf"), sum(t.power_max for t in turrets), roles)
 
 
-def _recommend(verdicts: list[TurretVerdict], combo: ComboPlan | None) -> str:
-    oks = [v for v in verdicts if v.state == "ok"]
-    if oks:
-        best = max(oks, key=lambda v: v.turret.power_max - v.required)
-        return f"use {best.name}"
-    overs = [v for v in verdicts if v.state == "overpower"]
-    if overs:
-        weakest = min(overs, key=lambda v: v.turret.power_min)
-        return f"use {weakest.name} (pulse — overpowered)"
-    if combo and len(combo.turrets) > 1:
-        names = [t.laser.name for t in combo.turrets]
-        ctrl = combo.turrets[combo.control_index].laser.name
-        pinned = [n for i, n in enumerate(names) if i != combo.control_index]
-        return f"needs {len(names)} lasers: pin {' + '.join(pinned)} @100%, control with {ctrl}"
-    return "can't break with this loadout"
+# Back-compat alias for older callers/tests.
+analyze = plan

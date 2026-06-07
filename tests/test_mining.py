@@ -72,24 +72,43 @@ def test_module_power_stacks_additively():
     assert math.isclose(hof.power_mult, 0.90, rel_tol=1e-9)
 
 
-def test_min_combo_needs_multiple_lasers():
-    # a heavy rock no single turret can crack, but the MOLE trio can
+def test_combo_lasers_not_all_red():
+    # a heavy rock no single turret can crack, but the MOLE trio can: the combo
+    # turrets must be green (@100%) / yellow (control), NOT red "can't break".
     rock = parse_rock_stats("MASS 40000 RESISTANCE 19%")
     turrets = [
         _turret("helix_s2"),
         _turret("hofstede_s2", "focus_mk3", "focus_mk3"),
         _turret("hofstede_s2", "focus_mk3", "focus_mk3"),
     ]
-    res = analyze(rock, turrets)
-    assert all(v.state == "cant" for v in res.verdicts)  # none solo
-    assert res.combo is not None
-    assert len(res.combo.turrets) >= 2
-    # control laser is the lowest-floor one (a Focus-Hofstede, not the Helix)
-    ctrl = res.combo.turrets[res.combo.control_index]
-    assert ctrl.laser.key == "hofstede_s2"
+    p = analyze(rock, turrets)
+    assert p.kind == "combo"
+    roles = [r.role for r in p.roles]
+    assert "@100%" in roles and "control" in roles
+    assert all(r.role != "can't break" for r in p.roles)  # the bug we fixed
+    # control is the lowest-floor laser (a Focus-Hofstede, not the Helix)
+    ctrl = next(r for r in p.roles if r.role == "control")
+    assert "Hofstede" in ctrl.name
+    assert p.power >= p.required and p.headroom >= 0
 
 
-def test_recommendation_strings():
+def test_single_plan_marks_use_with_headroom():
     rock = parse_rock_stats("MASS 8600 RESISTANCE 19%")
-    res = analyze(rock, [_turret("helix_s2")])
-    assert "Helix" in res.recommendation
+    p = analyze(rock, [_turret("helix_s2")])
+    assert p.kind == "single"
+    assert p.roles[0].role == "use"
+    assert p.roles[0].headroom is not None and p.roles[0].headroom > 0
+
+
+def test_pulse_plan_when_only_overpowered():
+    rock = parse_rock_stats("MASS 1570 RESISTANCE 19%")
+    p = analyze(rock, [_turret("helix_s2")])
+    assert p.kind == "pulse"
+    assert "too much power" in p.roles[0].role
+
+
+def test_impossible_all_red():
+    rock = parse_rock_stats("MASS 9999 RESISTANCE 99%")
+    p = analyze(rock, [_turret("hofstede_s2")])
+    assert p.kind == "impossible"
+    assert all(r.role == "can't break" for r in p.roles)

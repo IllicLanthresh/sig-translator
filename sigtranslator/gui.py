@@ -506,15 +506,28 @@ class ControlPanel:
 
         capture.close()
 
-    def _mining_lines(self, analysis):
-        rock = analysis.rock
-        acc = self.config.accent_color
-        lines = [(f"[ {int(round(rock.mass))} m · {rock.resistance:.0f}% ]", acc)]
-        colors = {"ok": "#33dd66", "overpower": "#ffcc44", "cant": "#ff5555"}
-        labels = {"ok": "controllable", "overpower": "too much power", "cant": "can't break"}
-        for v in analysis.verdicts:
-            lines.append((f"{v.name} — {labels[v.state]}", colors.get(v.state, "#ffffff")))
-        lines.append((f"→ {analysis.recommendation}", "#e8e8e8"))
+    @staticmethod
+    def _fnum(x):
+        return "∞" if x == float("inf") else f"{int(round(x)):,}"
+
+    def _mining_lines(self, plan):
+        rock = plan.rock
+        f = self._fnum
+        lines = [(f"[ {f(rock.mass)} m · {rock.resistance:.0f}% ]", self.config.accent_color)]
+        if plan.kind == "impossible":
+            stats = "impossible — resistance too high"
+        elif plan.kind == "combo":
+            stats = f"req {f(plan.required)} · combined {f(plan.power)} · +{f(plan.headroom)}"
+        elif plan.kind == "pulse":
+            stats = f"req {f(plan.required)} · power {f(plan.power)} · overpowered"
+        else:  # single
+            stats = f"req {f(plan.required)} · power {f(plan.power)} · +{f(plan.headroom)}"
+        lines.append((stats, "#cfd3d6"))
+        for r in plan.roles:
+            txt = f"{r.name}  {f(r.power_max)}  {r.role}"
+            if r.headroom is not None:
+                txt += f"  (+{f(r.headroom)})"
+            lines.append((txt, r.color))
         return lines
 
     def _poll_status(self) -> None:
