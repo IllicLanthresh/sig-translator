@@ -77,34 +77,41 @@ class BreakabilityOverlay(QWidget):
                          QFontMetrics(self._font(ss)))
         pill_text, pill_color = difficulty(plan)
 
-        stats = [("MASS", _fnum(plan.rock.mass)),
-                 ("RESISTANCE", f"{plan.rock.resistance:.0f}%")]
         band = (_fnum(plan.power_max) if plan.power_min == plan.power_max
                 else f"{_fnum(plan.power_min)}–{_fnum(plan.power_max)}")
         hr = plan.headroom
         sign = "+" if hr >= 0 else "−"
-        metrics = f"req {_fnum(plan.required)} · {band} · {sign}{_fnum(abs(hr))}"
+        hr_color = "#33dd66" if hr >= 0 else "#ff5555"
+
+        rock_rows = [("MASS", _fnum(plan.rock.mass), WHITE),
+                     ("RESISTANCE", f"{plan.rock.resistance:.0f}%", WHITE)]
+        metric_rows = [("REQUIRED", _fnum(plan.required), WHITE),
+                       ("YOUR POWER", band, WHITE),
+                       ("HEADROOM", f"{sign}{_fnum(abs(hr))}", hr_color)]
         if plan.stable_pct is not None and plan.kind != "impossible":
-            metrics += f" · hold {plan.stable_pct:.0f}%"
+            metric_rows.append(("HOLD AT", f"{plan.stable_pct:.0f}%", "#cfd3d6"))
         lasers = [(r.color, r.name, _fnum(r.power_max), r.role) for r in plan.roles]
 
+        all_rows = rock_rows + metric_rows
         w_header = hfm.horizontalAdvance("BREAKABILITY") + 14 + sfm.horizontalAdvance(pill_text) + 18
-        w_stats = max(rfm.horizontalAdvance(l) + 50 + rfm.horizontalAdvance(v) for l, v in stats)
-        w_metrics = sfm.horizontalAdvance(metrics)
+        w_stats = max(rfm.horizontalAdvance(l) + 50 + rfm.horizontalAdvance(v) for l, v, _ in all_rows)
         w_lasers = max((rfm.horizontalAdvance(n) + 24 + rfm.horizontalAdvance(p) + 18
                         + rfm.horizontalAdvance(ro)) for _c, n, p, ro in lasers) if lasers else 0
-        cw = max(w_header, w_stats, w_metrics, w_lasers, MINW - 2 * PAD)
+        cw = max(w_header, w_stats, w_lasers, MINW - 2 * PAD)
         width = cw + 2 * PAD
 
         items = []
         y = PAD
         items.append(("header", y, pill_text, pill_color)); y += hfm.height()
         items.append(("hline", y + 2, cw)); y += 12
-        for l, v in stats:
-            items.append(("row", y, l, v)); y += rfm.height()
+        for l, v, vc in rock_rows:
+            items.append(("row", y, l, v, vc)); y += rfm.height()
         y += 8
-        items.append(("gauge", y, 14, cw)); y += 14 + 7
-        items.append(("metrics", y, metrics)); y += sfm.height() + 7
+        items.append(("gauge", y, 14, cw)); y += 14 + 10
+        for l, v, vc in metric_rows:
+            items.append(("row", y, l, v, vc)); y += rfm.height()
+        y += 6
+        items.append(("hline", y, cw)); y += 8
         for c, n, p, ro in lasers:
             items.append(("laser", y, c, n, p, ro)); y += rfm.height()
         height = y + PAD
@@ -158,25 +165,18 @@ class BreakabilityOverlay(QWidget):
                 p.setPen(QPen(c, 1))
                 p.drawLine(PAD, int(y), PAD + cw, int(y))
             elif kind == "row":
-                _, y, label, value = it
+                _, y, label, value, vcolor = it
                 f = self._font(rs)
                 fm = QFontMetrics(f)
                 p.setFont(f)
                 base = y + fm.ascent()
                 p.setPen(QColor(MUTED))
                 p.drawText(PAD, base, label)
-                p.setPen(QColor(WHITE))
+                p.setPen(QColor(vcolor))
                 p.drawText(int(w - PAD - fm.horizontalAdvance(value)), base, value)
             elif kind == "gauge":
                 _, y, gh, cw = it
                 self._gauge(p, PAD, y, cw, gh, accent)
-            elif kind == "metrics":
-                _, y, text = it
-                f = self._font(ss, bold=False)
-                fm = QFontMetrics(f)
-                p.setFont(f)
-                p.setPen(QColor("#cfd3d6"))
-                p.drawText(PAD, y + fm.ascent(), text)
             elif kind == "laser":
                 _, y, color, name, power, role = it
                 f = self._font(rs)
