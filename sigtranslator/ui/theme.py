@@ -13,12 +13,13 @@ MUTED = "#9aa4b0"
 
 def qss(accent: str = "#7fdfff") -> str:
     return f"""
+    QMainWindow, QWidget#Page {{ background: {BG}; }}
     QWidget {{
-        background: {BG};
         color: {TEXT};
         font-family: "Bahnschrift", "Segoe UI", sans-serif;
         font-size: 14px;
     }}
+    QLabel, QCheckBox {{ background: transparent; }}
     QFrame#Card, QWidget#Card {{
         background: {PANEL};
         border: 1px solid {BORDER};

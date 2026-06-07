@@ -34,6 +34,7 @@ class Calibrator(QWidget):
         self.ox, self.oy = vg.x(), vg.y()
         self.setGeometry(vg)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)  # let the dim layer reveal the game
         self.setMouseTracking(True)
 
         self.boxes = []

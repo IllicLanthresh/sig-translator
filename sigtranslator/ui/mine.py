@@ -100,7 +100,7 @@ class MineView(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(14)
-        title = QLabel("Mining")
+        title = QLabel("Loadouts")
         title.setObjectName("H1")
         root.addWidget(title)
 
@@ -110,9 +110,6 @@ class MineView(QWidget):
         self.toggle.setChecked(cfg.mining_enabled)
         self.toggle.toggled.connect(self._toggle)
         trow.addWidget(self.toggle)
-        calb = QPushButton("Calibrate…")
-        calb.clicked.connect(ctx.open_calibration)
-        trow.addWidget(calb)
         self.cal_lbl = QLabel()
         self.cal_lbl.setObjectName("Muted")
         trow.addWidget(self.cal_lbl)

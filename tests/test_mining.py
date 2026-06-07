@@ -112,3 +112,24 @@ def test_impossible_all_red():
     p = analyze(rock, [_turret("hofstede_s2")])
     assert p.kind == "impossible"
     assert all(r.role == "can't break" for r in p.roles)
+
+
+def test_plan_carries_min_power_and_headroom():
+    rock = parse_rock_stats("MASS 8600 RESISTANCE 19%")
+    p = analyze(rock, [_turret("helix_s2")])
+    assert p.power_max == 4080 and p.power_min == 1020
+    assert math.isclose(p.headroom, 4080 - p.required, rel_tol=1e-9)
+
+
+def test_stable_pct_holdable():
+    rock = parse_rock_stats("MASS 8600 RESISTANCE 19%")
+    p = analyze(rock, [_turret("helix_s2")])  # req ~1984, max 4080 -> ~48.6%
+    assert 45 <= p.stable_pct <= 52
+    assert not p.stable_clamped
+
+
+def test_stable_pct_clamped_to_floor_when_overpowered():
+    rock = parse_rock_stats("MASS 1570 RESISTANCE 19%")
+    p = analyze(rock, [_turret("helix_s2")])  # req 362 < min 1020 -> clamps to floor 25%
+    assert p.stable_clamped
+    assert math.isclose(p.stable_pct, 25.0, abs_tol=0.5)

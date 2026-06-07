@@ -36,14 +36,17 @@ def mining_lines(plan, config) -> list[tuple[str, str]]:
     rock = plan.rock
     f = _fnum
     lines = [(f"[ {f(rock.mass)} m · {rock.resistance:.0f}% ]", config.accent_color)]
-    if plan.kind == "impossible":
-        stats = "impossible — resistance too high"
-    elif plan.kind == "combo":
-        stats = f"req {f(plan.required)} · combined {f(plan.power)} · +{f(plan.headroom)}"
-    elif plan.kind == "pulse":
-        stats = f"req {f(plan.required)} · power {f(plan.power)} · overpowered"
-    else:
-        stats = f"req {f(plan.required)} · power {f(plan.power)} · +{f(plan.headroom)}"
+    hr = plan.headroom
+    sign = "+" if hr >= 0 else "−"
+    band = f(plan.power_max) if plan.power_min == plan.power_max else \
+        f"{f(plan.power_min)}–{f(plan.power_max)}"
+    stats = f"req {f(plan.required)} · {band} · {sign}{f(abs(hr))}"
+    if plan.stable_pct is not None and plan.kind != "impossible":
+        stats += f" · hold {plan.stable_pct:.0f}%"
+    if plan.kind == "pulse":
+        stats += " · overpowered"
+    elif plan.kind == "impossible":
+        stats += " · can't break"
     lines.append((stats, "#cfd3d6"))
     for r in plan.roles:
         txt = f"{r.name}  {f(r.power_max)}  {r.role}"

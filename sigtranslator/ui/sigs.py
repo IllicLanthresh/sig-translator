@@ -30,10 +30,8 @@ class SigsView(QWidget):
         root.addWidget(title)
 
         c, lay = card("Capture box")
-        cal = QPushButton("Calibrate…")
-        cal.clicked.connect(ctx.open_calibration)
         crow = QHBoxLayout()
-        crow.addWidget(cal)
+        crow.addWidget(QLabel("Signature box:"))
         self.cal_lbl = QLabel()
         self.cal_lbl.setObjectName("Muted")
         crow.addWidget(self.cal_lbl)

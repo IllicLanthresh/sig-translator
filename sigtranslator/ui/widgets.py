@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 
@@ -28,7 +29,11 @@ class LinesView(QWidget):
         self._lay.setContentsMargins(0, 0, 0, 0)
         self._lay.setSpacing(2)
         self._placeholder = placeholder
+        self._font = None  # optional (family, size) to render lines like the overlay
         self.set_lines([])
+
+    def set_font_spec(self, family: str, size: int) -> None:
+        self._font = (family, size)
 
     def set_lines(self, lines) -> None:
         while self._lay.count():
@@ -44,4 +49,8 @@ class LinesView(QWidget):
         for text, color in lines:
             lbl = QLabel(text)
             lbl.setStyleSheet(f"color: {color}; background: transparent;")
+            if self._font:
+                fnt = QFont(self._font[0], self._font[1])
+                fnt.setBold(True)
+                lbl.setFont(fnt)
             self._lay.addWidget(lbl)

@@ -25,14 +25,13 @@ from ..config import Config
 from . import format as fmt
 from . import theme
 from .home import HomeView
-from .look import LookView
 from .mine import MineView
 from .overlay import Overlay
-from .setup import SetupView
+from .settings import SettingsView
 from .sigs import SigsView
 from .worker import Worker
 
-_NAV = ["◉  Home", "⌖  Sigs", "⛏  Mine", "✦  Look", "⚙  Setup"]
+_NAV = ["◉  Control", "⌖  Sigs", "⛏  Loadouts", "⚙  Settings"]
 
 
 class MainWindow(QMainWindow):
@@ -51,8 +50,7 @@ class MainWindow(QMainWindow):
         self.home = HomeView(self)
         self.sigs = SigsView(self)
         self.mine = MineView(self)
-        self.look = LookView(self)
-        self.setup = SetupView(self)
+        self.settings = SettingsView(self)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -65,7 +63,7 @@ class MainWindow(QMainWindow):
         for n in _NAV:
             self.nav.addItem(n)
         self.stack = QStackedWidget()
-        for v in (self.home, self.sigs, self.mine, self.look, self.setup):
+        for v in (self.home, self.sigs, self.mine, self.settings):
             self.stack.addWidget(v)
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.nav.setCurrentRow(0)

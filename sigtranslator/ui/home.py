@@ -22,7 +22,7 @@ class HomeView(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(14)
-        title = QLabel("Home")
+        title = QLabel("Control")
         title.setObjectName("H1")
         root.addWidget(title)
 

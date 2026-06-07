@@ -229,12 +229,32 @@ class Plan:
     rock: RockStats
     kind: str            # "single" | "pulse" | "combo" | "impossible"
     required: float      # operative requirement for the chosen plan
-    power: float         # operative available power for the chosen plan
+    power_max: float     # operative available power (full throttle)
+    power_min: float     # operative throttle floor
     roles: list[TurretRole]
 
     @property
+    def power(self) -> float:  # back-compat
+        return self.power_max
+
+    @property
     def headroom(self) -> float:
-        return self.power - self.required
+        return self.power_max - self.required
+
+    @property
+    def stable_pct(self) -> float | None:
+        """Throttle (% of max power) where the charge holds steady — the equilibrium
+        where input == decay, i.e. RequiredPower as a fraction of max, clamped to the
+        throttle floor. None if it can't break (required is infinite)."""
+        if self.power_max <= 0 or self.required == float("inf"):
+            return None
+        floor = self.power_min / self.power_max
+        return max(floor, min(1.0, self.required / self.power_max)) * 100
+
+    @property
+    def stable_clamped(self) -> bool:
+        """True when stable sits below the throttle floor (overshoots even at minimum)."""
+        return self.power_max > 0 and self.required < self.power_min
 
 
 def _best_subset_indices(rock: RockStats, turrets: list[Turret], min_size: int):
@@ -286,7 +306,8 @@ def plan(rock: RockStats, turrets: list[Turret]) -> Plan:
             else:
                 roles[i] = TurretRole(v.name, v.turret.power_max, "not needed", GREY)
         best = max(ok, key=lambda i: verdicts[i].turret.power_max - verdicts[i].required)
-        return Plan(rock, "single", verdicts[best].required, verdicts[best].turret.power_max, roles)
+        t = verdicts[best].turret
+        return Plan(rock, "single", verdicts[best].required, t.power_max, t.power_min, roles)
 
     if over:  # breaks alone but overshoots -> pulse the weakest one
         for i, v in enumerate(verdicts):
@@ -295,7 +316,8 @@ def plan(rock: RockStats, turrets: list[Turret]) -> Plan:
             else:
                 roles[i] = TurretRole(v.name, v.turret.power_max, "not needed", GREY)
         weakest = min(over, key=lambda i: verdicts[i].turret.power_min)
-        return Plan(rock, "pulse", verdicts[weakest].required, verdicts[weakest].turret.power_max, roles)
+        t = verdicts[weakest].turret
+        return Plan(rock, "pulse", verdicts[weakest].required, t.power_max, t.power_min, roles)
 
     combo = _best_subset_indices(rock, turrets, min_size=2)
     if combo:
@@ -308,11 +330,16 @@ def plan(rock: RockStats, turrets: list[Turret]) -> Plan:
                 roles[i] = TurretRole(verdicts[i].name, turrets[i].power_max, "@100%", GREEN)
             else:
                 roles[i] = TurretRole(verdicts[i].name, turrets[i].power_max, "spare", GREY)
-        return Plan(rock, "combo", req, total, roles)
+        # throttle floor of the combo: strong lasers pinned at max + control at its min
+        band_min = (total - turrets[ctrl].power_max) + turrets[ctrl].power_min
+        return Plan(rock, "combo", req, total, band_min, roles)
 
     for i, v in enumerate(verdicts):  # nothing, even combined, can break it
         roles[i] = TurretRole(v.name, v.turret.power_max, "can't break", RED)
-    return Plan(rock, "impossible", float("inf"), sum(t.power_max for t in turrets), roles)
+    req = (required_power(rock.mass, rock.resistance, min(t.resist_mod for t in turrets))
+           if turrets else float("inf"))
+    return Plan(rock, "impossible", req, sum(t.power_max for t in turrets),
+                sum(t.power_min for t in turrets), roles)
 
 
 # Back-compat alias for older callers/tests.

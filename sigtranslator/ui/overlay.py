@@ -55,22 +55,22 @@ class Overlay(QWidget):
             self.show()
 
     def paintEvent(self, _event) -> None:
+        # Subtle, game-like: just outlined text, centered, no panel.
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 10, 10)
-        p.fillPath(path, QColor(8, 12, 18, 170))
-        p.setPen(QPen(QColor(255, 255, 255, 28), 1))
-        p.drawPath(path)
-
         f = self._font()
         p.setFont(f)
         fm = QFontMetrics(f)
         y = self._pad
         for text, color in self._lines:
-            p.setPen(QColor(0, 14, 20, 200))           # soft shadow
-            p.drawText(self._pad + 1, y + fm.ascent() + 1, text)
-            p.setPen(QColor(color))                    # colored text
-            p.drawText(self._pad, y + fm.ascent(), text)
+            x = (self.width() - fm.horizontalAdvance(text)) // 2  # center each line
+            base = y + fm.ascent()
+            p.setPen(QColor(0, 8, 12, 235))            # dark outline for legibility
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx or dy:
+                        p.drawText(x + dx, base + dy, text)
+            p.setPen(QColor(color))
+            p.drawText(x, base, text)
             y += fm.height() + self._gap
         p.end()
