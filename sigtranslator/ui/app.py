@@ -1,130 +1,184 @@
-"""Qt app shell — single window with sidebar nav (Slice 1: shell + overlay spike).
+"""Qt app: single window (Home / Sigs / Mine / Look / Setup) + the two overlays.
 
-This is the de-risk slice: a themed window and a click-through overlay, so the
-transparent/always-on-top/click-through behaviour can be validated over Star Citizen
-before the full views are built. Logic modules are not wired in yet.
+This is the controller. It owns the config, the capture/OCR worker (a background thread
+that emits Qt signals), the two click-through overlays, and the views. Worker results
+fan out to the overlays (when enabled) and the Home live panels.
 """
 
 from __future__ import annotations
 
 import sys
+import threading
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QHBoxLayout,
-    QLabel,
     QListWidget,
     QMainWindow,
     QStackedWidget,
-    QVBoxLayout,
     QWidget,
 )
 
 from .. import __version__
+from ..config import Config
+from . import format as fmt
 from . import theme
+from .home import HomeView
+from .look import LookView
+from .mine import MineView
 from .overlay import Overlay
+from .setup import SetupView
+from .sigs import SigsView
+from .worker import Worker
 
 _NAV = ["◉  Home", "⌖  Sigs", "⛏  Mine", "✦  Look", "⚙  Setup"]
 
 
-def _page(title: str, body: str) -> QWidget:
-    w = QWidget()
-    lay = QVBoxLayout(w)
-    lay.setContentsMargins(24, 24, 24, 24)
-    lay.setSpacing(12)
-    h = QLabel(title)
-    h.setObjectName("H1")
-    lay.addWidget(h)
-    b = QLabel(body)
-    b.setObjectName("Muted")
-    b.setWordWrap(True)
-    lay.addWidget(b)
-    lay.addStretch(1)
-    return w
-
-
 class MainWindow(QMainWindow):
-    def __init__(self, overlay: Overlay) -> None:
+    hotkey_fired = Signal()
+    update_found = Signal(str)
+
+    def __init__(self, config: Config) -> None:
         super().__init__()
-        self.overlay = overlay
+        self.config = config
         self.setWindowTitle(f"sig-translator  v{__version__}")
-        self.resize(840, 560)
+        self.resize(880, 600)
+
+        self.sig_overlay = Overlay(config.font_family, config.font_size)
+        self.mining_overlay = Overlay(config.font_family, config.font_size)
+
+        self.home = HomeView(self)
+        self.sigs = SigsView(self)
+        self.mine = MineView(self)
+        self.look = LookView(self)
+        self.setup = SetupView(self)
 
         central = QWidget()
         self.setCentralWidget(central)
         row = QHBoxLayout(central)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
-
         self.nav = QListWidget()
         self.nav.setObjectName("Nav")
         self.nav.setFixedWidth(150)
         for n in _NAV:
             self.nav.addItem(n)
-
         self.stack = QStackedWidget()
-        self.stack.addWidget(self._home_page())
-        self.stack.addWidget(_page("Signatures", "Signature box calibration + the material "
-                                   "show/hide grid will live here."))
-        self.stack.addWidget(_page("Mining", "Saved loadouts + turret cards + rock-panel "
-                                   "calibration will live here."))
-        self.stack.addWidget(_page("Look", "Accent color, label size, overlays on/off, and a "
-                                   "live preview will live here."))
-        self.stack.addWidget(_page("Setup", "Hotkey, scan FPS, update check, about."))
+        for v in (self.home, self.sigs, self.mine, self.look, self.setup):
+            self.stack.addWidget(v)
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.nav.setCurrentRow(0)
-
         row.addWidget(self.nav)
         row.addWidget(self.stack, 1)
 
-    def _home_page(self) -> QWidget:
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(24, 24, 24, 24)
-        lay.setSpacing(12)
-        h = QLabel("Home")
-        h.setObjectName("H1")
-        lay.addWidget(h)
-        msg = QLabel(
-            "Qt shell + overlay spike. Toggle the test overlay below, then confirm over "
-            "Star Citizen that it floats on top AND that your clicks pass through to the game."
-        )
-        msg.setObjectName("Muted")
-        msg.setWordWrap(True)
-        lay.addWidget(msg)
-        self.cb = QCheckBox("Show test overlay")
-        self.cb.setChecked(True)
-        self.cb.toggled.connect(self._toggle)
-        lay.addWidget(self.cb)
-        lay.addStretch(1)
-        return w
+        self.worker = Worker(config)
+        self.worker.signals.sig.connect(self._on_sig)
+        self.worker.signals.mining.connect(self._on_mining)
+        self.worker.signals.status.connect(self.home.set_status)
+        self.worker.start()
 
-    def _toggle(self, on: bool) -> None:
-        if on:
-            self.show_sample()
+        self.hotkey_fired.connect(lambda: self.set_capture(not self.config.enabled))
+        self.update_found.connect(self.home.set_update)
+        self.register_hotkey()
+        self._start_update_check()
+
+    # ---- worker slots ----
+    def _on_sig(self, matches, number) -> None:
+        lines = fmt.sig_lines(matches, number, self.config)
+        self.home.live_sig.set_lines(lines)
+        if self.config.show_sig_overlay and self.config.calibrated and lines:
+            r = self.config.region
+            self._style(self.sig_overlay)
+            self.sig_overlay.set_lines(lines, anchor=(r.x + r.width // 2, r.y + r.height + 4))
         else:
-            self.overlay.hide()
+            self.sig_overlay.hide()
 
-    def show_sample(self) -> None:
-        geo = self.screen().geometry()
-        anchor = (geo.center().x(), int(geo.y() + geo.height() * 0.2))
-        self.overlay.set_lines(
-            [
-                ("[ 18,000 m · 19% ]", "#7fdfff"),
-                ("req 1,984 · power 4,080 · +2,096", "#cfd3d6"),
-                ("Helix S2  4,080  use  (+2,096)", "#33dd66"),
-                ("OVERLAY TEST — clicks should pass through", "#ffcc44"),
-            ],
-            anchor=anchor,
-        )
+    def _on_mining(self, plan) -> None:
+        lines = fmt.mining_lines(plan, self.config)
+        self.home.live_mine.set_lines(lines)
+        if self.config.show_mining_overlay and self.config.rock_calibrated and lines:
+            r = self.config.rock_region
+            self._style(self.mining_overlay)
+            self.mining_overlay.set_lines(lines, anchor=(r.x + r.width // 2, r.y - 4), above=True)
+        else:
+            self.mining_overlay.hide()
+
+    def _style(self, overlay: Overlay) -> None:
+        overlay._family = self.config.font_family
+        overlay._size = self.config.font_size
+
+    # ---- ctx API used by the views ----
+    def set_capture(self, on: bool) -> None:
+        self.config.enabled = bool(on)
+        self.config.save()
+        self.home.set_capture(on)
+
+    def open_calibration(self) -> None:
+        from .calibrate import calibrate
+
+        if calibrate(self.config, mining=self.config.mining_enabled):
+            self.sigs.refresh()
+            self.mine.refresh()
+
+    def on_appearance_changed(self) -> None:
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(theme.qss(self.config.accent_color))
+
+    def loadouts_changed(self) -> None:
+        self.home.refresh()
+        self.mine.refresh()
+
+    def open_releases(self) -> None:
+        import webbrowser
+
+        from ..update import RELEASES_URL
+
+        webbrowser.open(RELEASES_URL)
+
+    def register_hotkey(self) -> None:
+        try:
+            import keyboard
+        except Exception:
+            return
+        try:
+            keyboard.clear_all_hotkeys()
+        except Exception:
+            pass
+        try:
+            keyboard.add_hotkey(self.config.hotkey, self.hotkey_fired.emit)
+        except Exception:
+            pass
+
+    def _start_update_check(self) -> None:
+        if not self.config.check_updates:
+            return
+
+        def work():
+            from ..update import check_for_update
+
+            tag = check_for_update(__version__)
+            if tag:
+                self.update_found.emit(tag)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def closeEvent(self, event) -> None:
+        self.worker.stop()
+        try:
+            import keyboard
+
+            keyboard.clear_all_hotkeys()
+        except Exception:
+            pass
+        super().closeEvent(event)
 
 
 def run() -> int:
+    config = Config.load()
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setStyleSheet(theme.qss())
-    overlay = Overlay()
-    win = MainWindow(overlay)
+    app.setStyleSheet(theme.qss(config.accent_color))
+    win = MainWindow(config)
     win.show()
-    win.show_sample()
     return app.exec()

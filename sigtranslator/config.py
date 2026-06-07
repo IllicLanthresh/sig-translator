@@ -75,8 +75,26 @@ class Config:
     mining_enabled: bool = False
     rock_region: Region = field(default_factory=Region)  # 2nd capture box, the scan panel
     rock_calibrated: bool = False
-    # Loadout: up to 3 turrets, each {"laser": <key>, "modules": [<key>, ...]}.
+    # Legacy single loadout (migrated into `loadouts` on load); kept for back-compat.
     loadout: list = field(default_factory=list)
+    # Saved loadouts: [{"name": str, "turrets": [{"laser": key, "modules": [key, ...]}]}].
+    loadouts: list = field(default_factory=list)
+    active_loadout: str = ""
+    # --- Overlay visibility (off => second-monitor mode; GUI still shows the readout) ---
+    show_sig_overlay: bool = True
+    show_mining_overlay: bool = True
+
+    def active_turrets(self) -> list:
+        for lo in self.loadouts or []:
+            if lo.get("name") == self.active_loadout:
+                return lo.get("turrets", [])
+        return self.loadouts[0].get("turrets", []) if self.loadouts else []
+
+    def _migrate(self) -> None:
+        if not self.loadouts and self.loadout:
+            self.loadouts = [{"name": "Default", "turrets": self.loadout}]
+        if self.loadouts and not any(lo.get("name") == self.active_loadout for lo in self.loadouts):
+            self.active_loadout = self.loadouts[0].get("name", "")
 
     @classmethod
     def load(cls) -> "Config":
@@ -94,7 +112,9 @@ class Config:
                 # Ignore unknown/removed keys so old config files keep loading.
                 known = {f.name for f in fields(cls)} - {"region", "rock_region"}
                 raw = {k: v for k, v in raw.items() if k in known}
-                return cls(region=region, rock_region=rock_region, **raw)
+                cfg = cls(region=region, rock_region=rock_region, **raw)
+                cfg._migrate()
+                return cfg
             except Exception as exc:  # corrupt config -> fall back to defaults
                 print(f"[config] could not read {CONFIG_PATH}: {exc}; using defaults")
         cfg = cls()
