@@ -1,3 +1,3 @@
 """sig-translator: Star Citizen mining/salvage signature -> material overlay."""
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"

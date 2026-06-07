@@ -342,5 +342,22 @@ def plan(rock: RockStats, turrets: list[Turret]) -> Plan:
                 sum(t.power_min for t in turrets), roles)
 
 
+def difficulty(plan: "Plan") -> tuple[str, str]:
+    """SC-style verdict pill (label, color) derived from the plan."""
+    if plan.kind == "impossible":
+        return ("IMPOSSIBLE", RED)
+    if plan.kind == "pulse":
+        return ("OVERPOWERED", AMBER)
+    if plan.kind == "combo":
+        n = sum(1 for r in plan.roles if r.role in ("@100%", "control"))
+        return (f"NEEDS {n}", YELLOW)
+    ratio = plan.required / plan.power_max if plan.power_max else 1.0  # single
+    if ratio < 0.5:
+        return ("EASY", GREEN)
+    if ratio < 0.8:
+        return ("MODERATE", GREEN)
+    return ("TIGHT", AMBER)
+
+
 # Back-compat alias for older callers/tests.
 analyze = plan

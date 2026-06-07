@@ -7,6 +7,7 @@ from sigtranslator.mining import (
     MODULES_BY_KEY,
     Turret,
     analyze,
+    difficulty,
     parse_rock_stats,
     required_power,
     turret_verdict,
@@ -133,3 +134,14 @@ def test_stable_pct_clamped_to_floor_when_overpowered():
     p = analyze(rock, [_turret("helix_s2")])  # req 362 < min 1020 -> clamps to floor 25%
     assert p.stable_clamped
     assert math.isclose(p.stable_pct, 25.0, abs_tol=0.5)
+
+
+def test_difficulty_pills():
+    mole = [_turret("helix_s2"),
+            _turret("hofstede_s2", "focus_mk3", "focus_mk3"),
+            _turret("hofstede_s2", "focus_mk3", "focus_mk3")]
+    assert difficulty(analyze(parse_rock_stats("MASS 4000 RESISTANCE 19%"), mole))[0] == "EASY"
+    assert difficulty(analyze(parse_rock_stats("MASS 40000 RESISTANCE 19%"), mole))[0].startswith("NEEDS")
+    assert difficulty(analyze(parse_rock_stats("MASS 90000 RESISTANCE 19%"), mole))[0] == "IMPOSSIBLE"
+    # a lone overpowered laser -> OVERPOWERED
+    assert difficulty(analyze(parse_rock_stats("MASS 1570 RESISTANCE 19%"), [_turret("helix_s2")]))[0] == "OVERPOWERED"

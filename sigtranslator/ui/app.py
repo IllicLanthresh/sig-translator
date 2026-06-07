@@ -24,6 +24,7 @@ from .. import __version__
 from ..config import Config
 from . import format as fmt
 from . import theme
+from .breakability_overlay import BreakabilityOverlay
 from .home import HomeView
 from .mine import MineView
 from .overlay import Overlay
@@ -45,7 +46,7 @@ class MainWindow(QMainWindow):
         self.resize(880, 600)
 
         self.sig_overlay = Overlay(config.font_family, config.font_size)
-        self.mining_overlay = Overlay(config.font_family, config.font_size)
+        self.mining_overlay = BreakabilityOverlay()
 
         self.home = HomeView(self)
         self.sigs = SigsView(self)
@@ -93,12 +94,10 @@ class MainWindow(QMainWindow):
             self.sig_overlay.hide()
 
     def _on_mining(self, plan) -> None:
-        lines = fmt.mining_lines(plan, self.config)
-        self.home.live_mine.set_lines(lines)
-        if self.config.show_mining_overlay and self.config.rock_calibrated and lines:
+        self.home.live_mine.set_lines(fmt.mining_lines(plan, self.config))  # Home stays text
+        if self.config.show_mining_overlay and self.config.rock_calibrated and plan is not None:
             r = self.config.rock_region
-            self._style(self.mining_overlay)
-            self.mining_overlay.set_lines(lines, anchor=(r.x + r.width // 2, r.y - 4), above=True)
+            self.mining_overlay.set_plan(plan, self.config, (r.x + r.width // 2, r.y - 4))
         else:
             self.mining_overlay.hide()
 
