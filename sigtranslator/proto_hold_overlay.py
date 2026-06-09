@@ -31,8 +31,12 @@ if IS_WIN:
     from ctypes import wintypes
 
     _u32 = ctypes.windll.user32
+    _k32 = ctypes.windll.kernel32
     GWL_EXSTYLE = -20
     WS_EX_TRANSPARENT = 0x00000020
+    WS_EX_NOACTIVATE = 0x08000000
+    SW_SHOW = 5
+    SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001
 
     try:
         _get_long = _u32.GetWindowLongPtrW
@@ -46,32 +50,66 @@ if IS_WIN:
     _set_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
     _u32.GetForegroundWindow.restype = ctypes.c_void_p
     _u32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+    _u32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    _u32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    _u32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
 
     def get_foreground():
         return _u32.GetForegroundWindow()
 
+    def set_interactive(hwnd, on: bool):
+        """on=True -> window receives mouse + can be activated; on=False -> click-through."""
+        ex = _get_long(hwnd, GWL_EXSTYLE) or 0
+        if on:
+            ex &= ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE)
+        else:
+            ex |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+        _set_long(hwnd, GWL_EXSTYLE, ctypes.c_void_p(ex))
+
+    def force_foreground(hwnd):
+        """Steal foreground reliably past Windows' foreground-lock protection."""
+        hwnd = ctypes.c_void_p(hwnd)
+        fg = _u32.GetForegroundWindow()
+        try:
+            _u32.SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, None, 0)
+        except Exception:
+            pass
+        fg_thread = _u32.GetWindowThreadProcessId(fg, None) if fg else 0
+        cur_thread = _k32.GetCurrentThreadId()
+        attached = bool(fg_thread) and fg_thread != cur_thread
+        if attached:
+            _u32.AttachThreadInput(cur_thread, fg_thread, True)
+        _u32.BringWindowToTop(hwnd)
+        _u32.ShowWindow(hwnd, SW_SHOW)
+        _u32.SetForegroundWindow(hwnd)
+        _u32.SetActiveWindow(hwnd)
+        _u32.SetFocus(hwnd)
+        if attached:
+            _u32.AttachThreadInput(cur_thread, fg_thread, False)
+
     def set_foreground(hwnd):
         if hwnd:
             _u32.SetForegroundWindow(ctypes.c_void_p(hwnd))
-
-    def set_click_through(hwnd, on: bool):
-        ex = _get_long(hwnd, GWL_EXSTYLE) or 0
-        ex = (ex | WS_EX_TRANSPARENT) if on else (ex & ~WS_EX_TRANSPARENT)
-        _set_long(hwnd, GWL_EXSTYLE, ex)
 else:  # non-Windows: no-ops so the script at least launches for a visual check
     def get_foreground():
         return None
 
-    def set_foreground(hwnd):
+    def set_interactive(hwnd, on: bool):
         pass
 
-    def set_click_through(hwnd, on: bool):
+    def force_foreground(hwnd):
+        pass
+
+    def set_foreground(hwnd):
         pass
 
 
 class ProtoOverlay(QWidget):
     pressed = Signal()
     released = Signal()
+    tap = Signal()
+
+    HOLD_MS = 250  # press shorter than this = a normal Caps tap; longer = open the overlay
 
     def __init__(self, trigger: str = "caps lock") -> None:
         super().__init__(None)
@@ -79,6 +117,10 @@ class ProtoOverlay(QWidget):
         self.active = False
         self.game_hwnd = None
         self.clicks = 0
+        self._caps_down = False
+        self._engaged = False
+        self._hold_timer = None
+        self._hook = None
 
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -124,16 +166,56 @@ class ProtoOverlay(QWidget):
 
         self.pressed.connect(self._enter)
         self.released.connect(self._leave)
+        self.tap.connect(self._caps_tap_passthrough)
         self._refresh_info()
 
     # ---- key hook bridges to the GUI thread via signals ----
     def install_hook(self) -> None:
         import keyboard
 
-        # suppress=True on Caps Lock blocks its OS toggle so caps state never flips
-        suppress = self.trigger == "caps lock"
-        keyboard.on_press_key(self.trigger, lambda _e: self.pressed.emit(), suppress=suppress)
-        keyboard.on_release_key(self.trigger, lambda _e: self.released.emit(), suppress=suppress)
+        if self.trigger == "caps lock":
+            # Suppress raw Caps so its toggle never fires unexpectedly; we decide:
+            # a quick TAP -> re-send Caps (normal toggle for typing); a HOLD -> overlay.
+            self._hook = keyboard.hook_key("caps lock", self._on_caps, suppress=True)
+        else:
+            # any other key: plain hold = press enters, release leaves
+            keyboard.on_press_key(self.trigger, lambda _e: self.pressed.emit(), suppress=False)
+            keyboard.on_release_key(self.trigger, lambda _e: self.released.emit(), suppress=False)
+
+    def _on_caps(self, event) -> None:
+        import threading
+
+        if event.event_type == "down":
+            if self._caps_down:
+                return  # ignore key-repeat while held
+            self._caps_down = True
+            self._hold_timer = threading.Timer(self.HOLD_MS / 1000, self._caps_held)
+            self._hold_timer.start()
+        elif event.event_type == "up":
+            self._caps_down = False
+            if self._hold_timer is not None:
+                self._hold_timer.cancel()
+                self._hold_timer = None
+            if self._engaged:
+                self._engaged = False
+                self.released.emit()
+            else:
+                self.tap.emit()  # was a quick tap -> let it toggle caps as normal
+
+    def _caps_held(self) -> None:
+        if self._caps_down and not self._engaged:
+            self._engaged = True
+            self.pressed.emit()
+
+    def _caps_tap_passthrough(self) -> None:
+        """A genuine Caps tap was suppressed; re-issue one toggle so typing-caps works."""
+        import keyboard
+
+        if self._hook is not None:
+            keyboard.unhook(self._hook)
+            self._hook = None
+        keyboard.send("caps lock")
+        self._hook = keyboard.hook_key("caps lock", self._on_caps, suppress=True)
 
     def _center_panel(self) -> None:
         g = self.geometry()
@@ -156,12 +238,10 @@ class ProtoOverlay(QWidget):
         self.game_hwnd = get_foreground()  # remember the game so we can hand it back
         self._refresh_info()
         hwnd = int(self.winId())
-        set_click_through(hwnd, False)     # become clickable
+        set_interactive(hwnd, True)        # become clickable + activatable
         self.panel.show()
         self.update()
-        self.raise_()
-        self.activateWindow()
-        set_foreground(hwnd)               # steal focus -> game releases the mouse
+        force_foreground(hwnd)             # take focus -> game releases the mouse
 
     def _leave(self) -> None:
         if not self.active:
@@ -170,7 +250,7 @@ class ProtoOverlay(QWidget):
         hwnd = int(self.winId())
         self.panel.hide()
         self.update()
-        set_click_through(hwnd, True)      # back to click-through
+        set_interactive(hwnd, False)       # back to click-through
         set_foreground(self.game_hwnd)     # hand focus back to the game
 
     def paintEvent(self, _e) -> None:
