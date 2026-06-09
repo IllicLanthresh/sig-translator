@@ -39,7 +39,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"sig-translator {__version__}")
     parser.add_argument("--snapshot", action="store_true", help="save a PNG of the capture region and exit")
     parser.add_argument("--legacy", action="store_true", help="launch the old Tkinter UI")
+    parser.add_argument("--proto", action="store_true", help="throwaway hold-to-interact overlay spike")
+    parser.add_argument("--proto-key", default="scroll lock", help="hold key for --proto")
     args = parser.parse_args(argv)
+
+    if args.proto:
+        from .proto_hold_overlay import run as run_proto
+
+        return run_proto(args.proto_key)
 
     config = Config.load()
 
