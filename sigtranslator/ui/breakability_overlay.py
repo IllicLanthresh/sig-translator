@@ -189,7 +189,10 @@ class BreakabilityOverlay(QWidget):
         for h in self.heads:
             if not h["on"]:
                 continue
-            mods = list(h["passives"]) + [m for m in h["actives"] if m.key in h["firing"]]
+            # `firing` holds active-module SLOT indices, so identical modules
+            # (e.g. 3x Surge, same key) toggle independently.
+            mods = list(h["passives"]) + [m for ai, m in enumerate(h["actives"])
+                                          if ai in h["firing"]]
             out.append(Turret(h["laser"], mods))
         return out
 
@@ -267,8 +270,8 @@ class BreakabilityOverlay(QWidget):
             for h in self.heads:
                 w_head = 22 + rfm.horizontalAdvance(f"{h['laser'].name}") + 16 + \
                     rfm.horizontalAdvance(_fnum(h["laser"].power_max))
-                w_chips = 16 + sum(sfm.horizontalAdvance(self._chip_text(m, h)) + 14
-                                   for m in h["passives"] + h["actives"])
+                w_chips = 16 + sum(sfm.horizontalAdvance(m.name) + 14 for m in h["passives"]) \
+                    + sum(sfm.horizontalAdvance("▮ " + m.name) + 18 for m in h["actives"])
                 w_body = max(w_body, w_head, w_chips)
         else:
             w_body = max((rfm.horizontalAdvance(r.name) + 24 + rfm.horizontalAdvance(_fnum(r.power_max))
@@ -299,14 +302,13 @@ class BreakabilityOverlay(QWidget):
                 if h["passives"] or h["actives"]:
                     x = PAD + 18
                     for m in h["passives"]:
-                        t = self._chip_text(m, h)
-                        items.append(("passchip", y, x, t)); x += sfm.horizontalAdvance(t) + 14
-                    for m in h["actives"]:
-                        t = self._chip_text(m, h)
+                        items.append(("passchip", y, x, m.name)); x += sfm.horizontalAdvance(m.name) + 14
+                    for ai, m in enumerate(h["actives"]):
+                        firing = ai in h["firing"]
+                        t = ("▮ " if firing else "▯ ") + m.name
                         cwid = sfm.horizontalAdvance(t) + 10
                         rect = QRectF(x - 4, y - 1, cwid + 4, sfm.height() + 2)
-                        firing = m.key in h["firing"]
-                        items.append(("actchip", y, x, t, idx, m.key, firing, rect))
+                        items.append(("actchip", y, x, t, idx, ai, firing, rect))
                         x += cwid + 8
                     y += sfm.height() + 4
             items.append(("hint", y + 2, "release to fly")); y += sfm.height()
@@ -316,11 +318,6 @@ class BreakabilityOverlay(QWidget):
 
         self._items = items
         self._w, self._h = width, y + PAD
-
-    def _chip_text(self, m, h) -> str:
-        if m.kind != "Active":
-            return m.name
-        return ("▮ " if m.key in h["firing"] else "▯ ") + m.name
 
     def _place(self) -> None:
         self.resize(self._w, self._h)
@@ -489,9 +486,9 @@ class BreakabilityOverlay(QWidget):
                 self._after_toggle()
                 return
             if it[0] == "actchip" and it[7].contains(pos):
-                idx, key = it[4], it[5]
+                idx, ai = it[4], it[5]
                 fire = self.heads[idx]["firing"]
-                fire.discard(key) if key in fire else fire.add(key)
+                fire.discard(ai) if ai in fire else fire.add(ai)
                 self._after_toggle()
                 return
 
