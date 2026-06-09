@@ -35,6 +35,8 @@ MINW = 300
 MUTED = "#9aa4b0"
 WHITE = "#e6edf3"
 DIM = "#5e6770"
+ON = "#33dd66"    # head on / module firing
+OFF = "#ff5555"   # head off / module idle
 PANEL_BG = QColor(10, 14, 20, 224)
 _INF = float("inf")
 
@@ -263,20 +265,17 @@ class BreakabilityOverlay(QWidget):
             rock_rows = metric_rows = []
             w_rows = rfm.horizontalAdvance("waiting for a rock scan…")
 
-        # content width
+        # content width (heads + their module chips are shown in BOTH modes)
         w_header = hfm.horizontalAdvance("BREAKABILITY") + 14 + sfm.horizontalAdvance(pill_text) + 18
-        if self.active:
-            w_body = 0
-            for h in self.heads:
-                w_head = 22 + rfm.horizontalAdvance(f"{h['laser'].name}") + 16 + \
-                    rfm.horizontalAdvance(_fnum(h["laser"].power_max))
-                w_chips = 16 + sum(sfm.horizontalAdvance(m.name) + 14 for m in h["passives"]) \
-                    + sum(sfm.horizontalAdvance("▮ " + m.name) + 18 for m in h["actives"])
-                w_body = max(w_body, w_head, w_chips)
-        else:
-            w_body = max((rfm.horizontalAdvance(r.name) + 24 + rfm.horizontalAdvance(_fnum(r.power_max))
-                          + 18 + rfm.horizontalAdvance(r.role)) for r in plan.roles) if plan.roles else 0
-        cw = max(w_header, w_rows, w_body, MINW - 2 * PAD)
+        w_body = 0
+        for h in self.heads:
+            w_head = 22 + rfm.horizontalAdvance(h["laser"].name) + 16 + \
+                rfm.horizontalAdvance(_fnum(h["laser"].power_max))
+            w_chips = 16 + sum(sfm.horizontalAdvance(m.name) + 14 for m in h["passives"]) \
+                + sum(sfm.horizontalAdvance("▮ " + m.name) + 18 for m in h["actives"])
+            w_body = max(w_body, w_head, w_chips)
+        w_hint = sfm.horizontalAdvance(self._hint_text())
+        cw = max(w_header, w_rows, w_body, w_hint, MINW - 2 * PAD)
         width = cw + 2 * PAD
 
         items = []
@@ -295,29 +294,30 @@ class BreakabilityOverlay(QWidget):
             items.append(("hint", y, "waiting for a rock scan…")); y += sfm.height() + 4
         items.append(("hline", y, cw)); y += 8
 
-        if self.active:
-            for idx, h in enumerate(self.heads):
-                rect = QRectF(PAD - 4, y - 1, cw + 8, rh)
-                items.append(("headrow", y, idx, h, rect)); y += rh
-                if h["passives"] or h["actives"]:
-                    x = PAD + 18
-                    for m in h["passives"]:
-                        items.append(("passchip", y, x, m.name)); x += sfm.horizontalAdvance(m.name) + 14
-                    for ai, m in enumerate(h["actives"]):
-                        firing = ai in h["firing"]
-                        t = ("▮ " if firing else "▯ ") + m.name
-                        cwid = sfm.horizontalAdvance(t) + 10
-                        rect = QRectF(x - 4, y - 1, cwid + 4, sfm.height() + 2)
-                        items.append(("actchip", y, x, t, idx, ai, firing, rect))
-                        x += cwid + 8
-                    y += sfm.height() + 4
-            items.append(("hint", y + 2, "release to fly")); y += sfm.height()
-        else:
-            for r in plan.roles:
-                items.append(("laser", y, r.color, r.name, _fnum(r.power_max), r.role)); y += rh
+        for idx, h in enumerate(self.heads):
+            rect = QRectF(PAD - 4, y - 1, cw + 8, rh)
+            items.append(("headrow", y, idx, h, rect)); y += rh
+            if h["passives"] or h["actives"]:
+                x = PAD + 18
+                for m in h["passives"]:
+                    items.append(("passchip", y, x, m.name)); x += sfm.horizontalAdvance(m.name) + 14
+                for ai, m in enumerate(h["actives"]):
+                    firing = ai in h["firing"]
+                    t = ("▮ " if firing else "▯ ") + m.name
+                    cwid = sfm.horizontalAdvance(t) + 10
+                    rect = QRectF(x - 4, y - 1, cwid + 4, sfm.height() + 2)
+                    items.append(("actchip", y, x, t, idx, ai, firing, rect))
+                    x += cwid + 8
+                y += sfm.height() + 4
+        items.append(("hint", y + 2, self._hint_text())); y += sfm.height()
 
         self._items = items
         self._w, self._h = width, y + PAD
+
+    def _hint_text(self) -> str:
+        if self.active:
+            return "release to fly"
+        return f"hold {self.trigger.title()} to edit"
 
     def _place(self) -> None:
         self.resize(self._w, self._h)
@@ -411,11 +411,9 @@ class BreakabilityOverlay(QWidget):
         f = self._font(rs); fm = QFontMetrics(f); p.setFont(f)
         base = y + fm.ascent()
         on = h["on"]
+        col = ON if on else OFF
         dot = QRectF(PAD, y + fm.height() / 2 - 5, 10, 10)
-        if on:
-            p.setBrush(QColor(accent)); p.setPen(Qt.NoPen); p.drawEllipse(dot)
-        else:
-            p.setBrush(Qt.NoBrush); p.setPen(QPen(QColor(DIM), 1.4)); p.drawEllipse(dot)
+        p.setBrush(QColor(col)); p.setPen(Qt.NoPen); p.drawEllipse(dot)
         p.setPen(QColor(WHITE if on else DIM))
         p.drawText(PAD + 22, base, h["laser"].name)
         pw = _fnum(h["laser"].power_max)
@@ -423,16 +421,15 @@ class BreakabilityOverlay(QWidget):
         p.drawText(int(w - PAD - fm.horizontalAdvance(pw)), base, pw)
 
     def _draw_actchip(self, p, it, accent, ss) -> None:
-        _, y, x, t, _idx, _key, firing, rect = it
+        _, y, x, t, _idx, _ai, firing, rect = it
         f = self._font(ss, bold=False); fm = QFontMetrics(f); p.setFont(f)
-        if firing:
-            bg = QColor("#33dd66"); bg.setAlpha(40)
-            p.fillPath(self._round(rect, 4), bg)
-            p.setPen(QColor("#9defb8"))
-        else:
-            p.setPen(QPen(QColor(0x3a, 0x4b, 0x5a), 1))
-            p.drawPath(self._round(rect, 4))
-            p.setPen(QColor(MUTED))
+        col = ON if firing else OFF
+        fill = QColor(col); fill.setAlpha(38)
+        p.fillPath(self._round(rect, 4), fill)
+        edge = QColor(col); edge.setAlpha(150)
+        p.setPen(QPen(edge, 1))
+        p.drawPath(self._round(rect, 4))
+        p.setPen(QColor(col))
         p.drawText(int(x), int(y + fm.ascent()), t)
 
     @staticmethod
