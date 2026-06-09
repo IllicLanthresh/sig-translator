@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--snapshot", action="store_true", help="save a PNG of the capture region and exit")
     parser.add_argument("--legacy", action="store_true", help="launch the old Tkinter UI")
     parser.add_argument("--proto", action="store_true", help="throwaway hold-to-interact overlay spike")
-    parser.add_argument("--proto-key", default="scroll lock", help="hold key for --proto")
+    parser.add_argument("--proto-key", default="caps lock", help="hold key for --proto")
     args = parser.parse_args(argv)
 
     if args.proto:

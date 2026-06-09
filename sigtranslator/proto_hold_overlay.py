@@ -6,11 +6,13 @@ spike to de-risk the real design — it is NOT wired into the app architecture a
 should be deleted once we've validated the behaviour.
 
 Run it, get into a ship in SC (borderless windowed), then:
-  * HOLD  Scroll Lock  -> screen dims, cursor appears, the dummy panel is clickable
-  * click the buttons  -> the click counter goes up (proves mouse works over us)
-  * RELEASE Scroll Lock -> dim + cursor vanish, focus snaps back to the game
+  * HOLD  Caps Lock  -> screen dims, cursor appears, the dummy panel is clickable
+  * click the buttons -> the click counter goes up (proves mouse works over us)
+  * RELEASE Caps Lock -> dim + cursor vanish, focus snaps back to the game
+  * QUIT: click "Quit prototype" on the panel, or press Esc while holding.
 
-Everything you need to watch is drawn on the panel (the exe has no console).
+Caps Lock's normal toggle is suppressed while running, so your caps state never
+flips. Everything you need to watch is drawn on the panel (the exe has no console).
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
 
 IS_WIN = sys.platform == "win32"
@@ -71,7 +73,7 @@ class ProtoOverlay(QWidget):
     pressed = Signal()
     released = Signal()
 
-    def __init__(self, trigger: str = "scroll lock") -> None:
+    def __init__(self, trigger: str = "caps lock") -> None:
         super().__init__(None)
         self.trigger = trigger
         self.active = False
@@ -107,9 +109,18 @@ class ProtoOverlay(QWidget):
             lay.addWidget(btn)
         lay.insertWidget(0, self.title)
         lay.addWidget(self.info)
+        quit_btn = QPushButton("Quit prototype")
+        quit_btn.setStyleSheet("border-color:#ff5555;color:#ff9a9a;")
+        quit_btn.clicked.connect(QApplication.quit)
+        lay.addWidget(quit_btn)
         self.panel.adjustSize()
         self._center_panel()
         self.panel.hide()
+
+        # Esc closes it too (works while we hold focus during interact)
+        esc = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        esc.setContext(Qt.ApplicationShortcut)
+        esc.activated.connect(QApplication.quit)
 
         self.pressed.connect(self._enter)
         self.released.connect(self._leave)
@@ -119,8 +130,10 @@ class ProtoOverlay(QWidget):
     def install_hook(self) -> None:
         import keyboard
 
-        keyboard.on_press_key(self.trigger, lambda _e: self.pressed.emit(), suppress=False)
-        keyboard.on_release_key(self.trigger, lambda _e: self.released.emit(), suppress=False)
+        # suppress=True on Caps Lock blocks its OS toggle so caps state never flips
+        suppress = self.trigger == "caps lock"
+        keyboard.on_press_key(self.trigger, lambda _e: self.pressed.emit(), suppress=suppress)
+        keyboard.on_release_key(self.trigger, lambda _e: self.released.emit(), suppress=suppress)
 
     def _center_panel(self) -> None:
         g = self.geometry()
@@ -168,7 +181,7 @@ class ProtoOverlay(QWidget):
         p.end()
 
 
-def run(trigger: str = "scroll lock") -> int:
+def run(trigger: str = "caps lock") -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     ov = ProtoOverlay(trigger)
     ov.show()
@@ -180,5 +193,5 @@ def run(trigger: str = "scroll lock") -> int:
 
 
 if __name__ == "__main__":
-    key = sys.argv[1] if len(sys.argv) > 1 else "scroll lock"
+    key = sys.argv[1] if len(sys.argv) > 1 else "caps lock"
     sys.exit(run(key))
