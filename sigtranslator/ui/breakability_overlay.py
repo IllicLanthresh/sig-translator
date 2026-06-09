@@ -303,10 +303,9 @@ class BreakabilityOverlay(QWidget):
                     items.append(("passchip", y, x, m.name)); x += sfm.horizontalAdvance(m.name) + 14
                 for ai, m in enumerate(h["actives"]):
                     firing = ai in h["firing"]
-                    t = ("▮ " if firing else "▯ ") + m.name
-                    cwid = sfm.horizontalAdvance(t) + 10
+                    cwid = sfm.horizontalAdvance("▮ " + m.name) + 10
                     rect = QRectF(x - 4, y - 1, cwid + 4, sfm.height() + 2)
-                    items.append(("actchip", y, x, t, idx, ai, firing, rect))
+                    items.append(("actchip", y, x, m.name, idx, ai, firing, rect))
                     x += cwid + 8
                 y += sfm.height() + 4
         items.append(("hint", y + 2, self._hint_text())); y += sfm.height()
@@ -363,8 +362,6 @@ class BreakabilityOverlay(QWidget):
                 p.drawText(int(w - PAD - fm.horizontalAdvance(value)), base, value)
             elif kind == "gauge":
                 self._gauge(p, PAD, it[1], it[3], it[2], accent)
-            elif kind == "laser":
-                self._draw_laser(p, it, w, rs)
             elif kind == "headrow":
                 self._draw_headrow(p, it, w, accent, rs)
             elif kind == "passchip":
@@ -394,18 +391,6 @@ class BreakabilityOverlay(QWidget):
         p.setFont(sf); p.setPen(QColor(pcol))
         p.drawText(int(px + 8), int(y + sfm.ascent() + 2), pill)
 
-    def _draw_laser(self, p, it, w, rs) -> None:
-        _, y, color, name, power, role = it
-        f = self._font(rs); fm = QFontMetrics(f); p.setFont(f)
-        base = y + fm.ascent()
-        p.setBrush(QColor(color)); p.setPen(Qt.NoPen)
-        p.drawEllipse(QRectF(PAD, y + fm.height() / 2 - 4, 8, 8))
-        p.setPen(QColor(WHITE)); p.drawText(PAD + 16, base, name)
-        p.setPen(QColor(MUTED))
-        p.drawText(int(PAD + 16 + fm.horizontalAdvance(name) + 12), base, power)
-        p.setPen(QColor(color))
-        p.drawText(int(w - PAD - fm.horizontalAdvance(role)), base, role)
-
     def _draw_headrow(self, p, it, w, accent, rs) -> None:
         _, y, idx, h, _rect = it
         f = self._font(rs); fm = QFontMetrics(f); p.setFont(f)
@@ -421,22 +406,14 @@ class BreakabilityOverlay(QWidget):
         p.drawText(int(w - PAD - fm.horizontalAdvance(pw)), base, pw)
 
     def _draw_actchip(self, p, it, accent, ss) -> None:
-        _, y, x, t, _idx, _ai, firing, rect = it
+        _, y, x, name, _idx, _ai, firing, _rect = it
         f = self._font(ss, bold=False); fm = QFontMetrics(f); p.setFont(f)
-        col = ON if firing else OFF
-        fill = QColor(col); fill.setAlpha(38)
-        p.fillPath(self._round(rect, 4), fill)
-        edge = QColor(col); edge.setAlpha(150)
-        p.setPen(QPen(edge, 1))
-        p.drawPath(self._round(rect, 4))
-        p.setPen(QColor(col))
-        p.drawText(int(x), int(y + fm.ascent()), t)
-
-    @staticmethod
-    def _round(rect: QRectF, r: float) -> QPainterPath:
-        path = QPainterPath()
-        path.addRoundedRect(rect, r, r)
-        return path
+        base = y + fm.ascent()
+        marker = "▮ " if firing else "▯ "
+        p.setPen(QColor(ON if firing else OFF))
+        p.drawText(int(x), int(base), marker)
+        p.setPen(QColor(WHITE if firing else MUTED))
+        p.drawText(int(x + fm.horizontalAdvance(marker)), int(base), name)
 
     def _gauge(self, p, gx, gy, gw, gh, accent) -> None:
         plan = self._plan
