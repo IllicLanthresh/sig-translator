@@ -21,7 +21,28 @@ import sys
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QShortcut
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .config import Config
+from .mining import (
+    LASERS_BY_KEY,
+    MODULES_BY_KEY,
+    Turret,
+    difficulty,
+    eval_config,
+    parse_rock_stats,
+)
+
+# Until live OCR feeds the spike, evaluate against a fixed rock so the panel reacts.
+SAMPLE_ROCK = parse_rock_stats("MASS 8600 RESISTANCE 19%")
 
 IS_WIN = sys.platform == "win32"
 
@@ -111,16 +132,18 @@ class ProtoOverlay(QWidget):
 
     HOLD_MS = 250  # press shorter than this = a normal Caps tap; longer = open the overlay
 
-    def __init__(self, trigger: str = "caps lock") -> None:
+    def __init__(self, config: Config, trigger: str = "caps lock") -> None:
         super().__init__(None)
+        self.config = config
         self.trigger = trigger
         self.active = False
         self.game_hwnd = None
-        self.clicks = 0
         self._caps_down = False
         self._engaged = False
         self._hold_timer = None
         self._hook = None
+        # runtime config state (per session): which heads on + which actives firing
+        self.heads = self._load_heads()  # [{laser, passives[], actives[], on, firing:set}]
 
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -129,37 +152,8 @@ class ProtoOverlay(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setGeometry(QApplication.primaryScreen().geometry())
 
-        # dummy panel (hidden until you hold the key)
-        self.panel = QWidget(self)
-        self.panel.setObjectName("Panel")
-        self.panel.setStyleSheet(
-            "#Panel{background:rgba(12,16,22,230);border:1px solid #29d3ff;border-radius:10px;}"
-            "QLabel{color:#e6edf3;background:transparent;}"
-            "QPushButton{color:#e6edf3;background:#1b2a36;border:1px solid #29d3ff;"
-            "border-radius:6px;padding:10px 16px;}"
-            "QPushButton:hover{background:#26415a;}"
-        )
-        lay = QVBoxLayout(self.panel)
-        lay.setContentsMargins(20, 20, 20, 20)
-        lay.setSpacing(12)
-        self.title = QLabel("HOLD-TO-INTERACT PROTOTYPE")
-        self.title.setFont(QFont("Bahnschrift", 16, QFont.Bold))
-        self.info = QLabel()
-        for b in ("Toggle A", "Toggle B", "Toggle C"):
-            btn = QPushButton(b)
-            btn.clicked.connect(self._bump)
-            lay.addWidget(btn)
-        lay.insertWidget(0, self.title)
-        lay.addWidget(self.info)
-        quit_btn = QPushButton("Quit prototype")
-        quit_btn.setStyleSheet("border-color:#ff5555;color:#ff9a9a;")
-        quit_btn.clicked.connect(QApplication.quit)
-        lay.addWidget(quit_btn)
-        self.panel.adjustSize()
-        self._center_panel()
-        self.panel.hide()
+        self._build_panel()
 
-        # Esc closes it too (works while we hold focus during interact)
         esc = QShortcut(QKeySequence(Qt.Key_Escape), self)
         esc.setContext(Qt.ApplicationShortcut)
         esc.activated.connect(QApplication.quit)
@@ -167,7 +161,144 @@ class ProtoOverlay(QWidget):
         self.pressed.connect(self._enter)
         self.released.connect(self._leave)
         self.tap.connect(self._caps_tap_passthrough)
-        self._refresh_info()
+        self._recompute()
+
+    # ---- loadout -> runtime head state ----
+    def _load_heads(self) -> list:
+        heads = []
+        for entry in self.config.active_turrets():
+            laser = LASERS_BY_KEY.get((entry or {}).get("laser"))
+            if not laser:
+                continue
+            passives, actives = [], []
+            for k in entry.get("modules", []):
+                m = MODULES_BY_KEY.get(k)
+                if not m:
+                    continue
+                (actives if m.kind == "Active" else passives).append(m)
+            heads.append({"laser": laser, "passives": passives, "actives": actives,
+                          "on": True, "firing": set()})
+        return heads
+
+    def _active_turrets(self) -> list:
+        turrets = []
+        for h in self.heads:
+            if not h["on"]:
+                continue
+            mods = list(h["passives"]) + [m for m in h["actives"] if m.key in h["firing"]]
+            turrets.append(Turret(h["laser"], mods))
+        return turrets
+
+    # ---- panel ----
+    def _build_panel(self) -> None:
+        self.panel = QWidget(self)
+        self.panel.setObjectName("Panel")
+        self.panel.setStyleSheet(
+            "#Panel{background:rgba(12,16,22,235);border:1px solid #29d3ff;border-radius:10px;}"
+            "QLabel{color:#e6edf3;background:transparent;}"
+            "QLabel#Muted{color:#9aa4b0;}"
+            "QPushButton{color:#e6edf3;background:#16222e;border:1px solid #2a3b4a;"
+            "border-radius:6px;padding:6px 10px;}"
+            "QPushButton:hover{background:#1f3344;}"
+            "QPushButton:checked{background:#13402a;border-color:#33dd66;color:#bdfcd2;}"
+            "QPushButton#Head:checked{background:#10324a;border-color:#29d3ff;color:#cdeffc;}"
+            "QPushButton#Quit{border-color:#5a2530;color:#ff9a9a;}"
+        )
+        root = QVBoxLayout(self.panel)
+        root.setContentsMargins(18, 16, 18, 16)
+        root.setSpacing(10)
+
+        title = QLabel("BREAKABILITY")
+        title.setFont(QFont("Bahnschrift", 15, QFont.Bold))
+        title.setStyleSheet("color:#29d3ff;")
+        self.pill = QLabel("")
+        self.pill.setFont(QFont("Bahnschrift", 11, QFont.Bold))
+        top = QHBoxLayout()
+        top.addWidget(title)
+        top.addStretch(1)
+        top.addWidget(self.pill)
+        root.addLayout(top)
+
+        if not self.heads:
+            root.addWidget(QLabel("No loadout configured — set one in the app first."))
+        for i, h in enumerate(self.heads):
+            root.addWidget(self._head_row(i, h))
+
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("color:#29d3ff;")
+        root.addWidget(line)
+        self.verdict = QLabel("")
+        self.verdict.setFont(QFont("Bahnschrift", 11))
+        root.addWidget(self.verdict)
+        note = QLabel("sample rock (live scan next)   ·   hold to edit, release to fly")
+        note.setObjectName("Muted")
+        note.setFont(QFont("Bahnschrift", 9))
+        root.addWidget(note)
+
+        quit_btn = QPushButton("Quit")
+        quit_btn.setObjectName("Quit")
+        quit_btn.clicked.connect(QApplication.quit)
+        root.addWidget(quit_btn, alignment=Qt.AlignRight)
+
+        self.panel.adjustSize()
+        self._center_panel()
+        self.panel.hide()
+
+    def _head_row(self, i: int, h: dict) -> QWidget:
+        box = QWidget()
+        col = QVBoxLayout(box)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(4)
+        head = QPushButton(f"{h['laser'].name}   {int(h['laser'].power_max):,}")
+        head.setObjectName("Head")
+        head.setCheckable(True)
+        head.setChecked(h["on"])
+        head.toggled.connect(lambda on, idx=i: self._set_head(idx, on))
+        col.addWidget(head)
+
+        chips = QHBoxLayout()
+        chips.setContentsMargins(16, 0, 0, 0)
+        chips.setSpacing(6)
+        for m in h["passives"]:
+            lab = QLabel(f"{m.name}")
+            lab.setObjectName("Muted")
+            lab.setFont(QFont("Bahnschrift", 9))
+            lab.setToolTip("passive — always on")
+            chips.addWidget(lab)
+        for m in h["actives"]:
+            chip = QPushButton(m.name)
+            chip.setCheckable(True)
+            chip.setFont(QFont("Bahnschrift", 9))
+            chip.toggled.connect(lambda on, idx=i, key=m.key: self._set_active(idx, key, on))
+            chips.addWidget(chip)
+        chips.addStretch(1)
+        col.addLayout(chips)
+        return box
+
+    def _set_head(self, i: int, on: bool) -> None:
+        self.heads[i]["on"] = on
+        self._recompute()
+
+    def _set_active(self, i: int, key: str, on: bool) -> None:
+        fire = self.heads[i]["firing"]
+        fire.add(key) if on else fire.discard(key)
+        self._recompute()
+
+    def _recompute(self) -> None:
+        plan = eval_config(SAMPLE_ROCK, self._active_turrets())
+        label, color = difficulty(plan)
+        self.pill.setText(label)
+        self.pill.setStyleSheet(f"color:{color};")
+        f = lambda x: "∞" if x == float("inf") else f"{int(round(x)):,}"
+        hr = plan.headroom
+        sign = "+" if hr >= 0 else "−"
+        band = f(plan.power_max) if plan.power_min == plan.power_max else f"{f(plan.power_min)}–{f(plan.power_max)}"
+        txt = f"req {f(plan.required)}   ·   you {band}   ·   {sign}{f(abs(hr))}"
+        if plan.stable_pct is not None and plan.kind != "impossible":
+            txt += f"   ·   hold {plan.stable_pct:.0f}%"
+        self.verdict.setText(txt)
+        self.verdict.setStyleSheet(f"color:{color};")
 
     # ---- key hook bridges to the GUI thread via signals ----
     def install_hook(self) -> None:
@@ -222,21 +353,11 @@ class ProtoOverlay(QWidget):
         self.panel.move((g.width() - self.panel.width()) // 2,
                         (g.height() - self.panel.height()) // 2)
 
-    def _bump(self) -> None:
-        self.clicks += 1
-        self._refresh_info()
-
-    def _refresh_info(self) -> None:
-        hwnd = f"0x{self.game_hwnd:x}" if self.game_hwnd else "—"
-        self.info.setText(f"clicks: {self.clicks}    last game window: {hwnd}\n"
-                          f"release [{self.trigger}] to return to the game")
-
     def _enter(self) -> None:
         if self.active:
             return
         self.active = True
         self.game_hwnd = get_foreground()  # remember the game so we can hand it back
-        self._refresh_info()
         hwnd = int(self.winId())
         set_interactive(hwnd, True)        # become clickable + activatable
         self.panel.show()
@@ -263,12 +384,12 @@ class ProtoOverlay(QWidget):
 
 def run(trigger: str = "caps lock") -> int:
     app = QApplication.instance() or QApplication(sys.argv)
-    ov = ProtoOverlay(trigger)
+    ov = ProtoOverlay(Config.load(), trigger)
     ov.show()
     try:
         ov.install_hook()
-    except Exception as exc:  # noqa: BLE001
-        ov.info.setText(f"keyboard hook failed: {exc}")
+    except Exception:  # noqa: BLE001
+        pass  # no global hook (e.g. not Windows / no perms) — panel still works on click
     return app.exec()
 
 

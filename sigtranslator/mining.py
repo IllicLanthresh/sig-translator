@@ -359,5 +359,30 @@ def difficulty(plan: "Plan") -> tuple[str, str]:
     return ("TIGHT", AMBER)
 
 
+def eval_config(rock: RockStats, turrets: list[Turret]) -> Plan:
+    """Evaluate ONE user-chosen config (the manual path — no optimizer).
+
+    `turrets` is exactly the heads the user has firing, each already carrying the
+    modules currently active on it. Combined power adds across heads; req uses the
+    best (most negative) resistance among them. Returns a Plan whose gauge/pill the
+    overlay renders as-is. Each head gets a simple on-state role (no use/control).
+    """
+    if not turrets:
+        return Plan(rock, "impossible", float("inf"), 0.0, 0.0, [])
+    req = required_power(rock.mass, rock.resistance, min(t.resist_mod for t in turrets))
+    pmax = sum(t.power_max for t in turrets)
+    pmin = sum(t.power_min for t in turrets)
+    if pmax < req:
+        kind, color = "impossible", RED
+    elif pmin > req:
+        kind, color = "pulse", AMBER
+    else:
+        # manual mode: no "needs N combo" concept — any breakable pick reads by
+        # headroom (EASY/MODERATE/TIGHT), so keep kind "single" regardless of head count.
+        kind, color = "single", GREEN
+    roles = [TurretRole(t.laser.name, t.power_max, "on", color) for t in turrets]
+    return Plan(rock, kind, req, pmax, pmin, roles)
+
+
 # Back-compat alias for older callers/tests.
 analyze = plan
