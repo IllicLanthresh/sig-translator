@@ -145,9 +145,11 @@ class BreakabilityOverlay(QWidget):
         self._hook = None
         self.heads = self._load_heads()
 
+        # NB: no Qt.WindowTransparentForInput here — that Qt flag stops Qt from
+        # delivering clicks to our hit-test even after we clear the native bit. Idle
+        # click-through is done natively instead (set_interactive in showEvent/_leave).
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
-            | Qt.WindowTransparentForInput
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
