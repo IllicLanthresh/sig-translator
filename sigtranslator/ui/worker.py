@@ -16,7 +16,7 @@ from PySide6.QtCore import QObject, Signal
 class WorkerSignals(QObject):
     status = Signal(str)
     sig = Signal(object, object)   # (matches, number); (None, None) => clear
-    mining = Signal(object)        # Plan or None
+    mining = Signal(object)        # RockStats or None (overlay evaluates the user's config)
 
 
 class Worker:
@@ -44,7 +44,7 @@ class Worker:
         import numpy as np
 
         from ..capture import Capture
-        from ..mining import analyze, parse_rock_stats, turrets_from_loadout
+        from ..mining import parse_rock_stats
         from ..ocr import DigitOCR
         from ..translate import translate_matches
 
@@ -92,9 +92,9 @@ class Worker:
                 self.signals.status.emit("paused")
             was_enabled = cfg.enabled
 
-            # --- mining (independent) ---
-            turrets = cfg.active_turrets()
-            if cfg.mining_enabled and cfg.rock_calibrated and turrets:
+            # --- mining (independent): emit the scanned rock; the overlay evaluates
+            #     it against the user's live config (heads / active modules) ---
+            if cfg.mining_enabled and cfg.rock_calibrated:
                 try:
                     rimg = capture.grab(cfg.rock_region)
                     rfp = self._fp(rimg)
@@ -102,10 +102,7 @@ class Worker:
                         pass
                     else:
                         last_rfp = rfp
-                        rock = parse_rock_stats(ocr.read_text(rimg))
-                        self.signals.mining.emit(
-                            analyze(rock, turrets_from_loadout(turrets)) if rock else None
-                        )
+                        self.signals.mining.emit(parse_rock_stats(ocr.read_text(rimg)))
                 except Exception:
                     self.signals.mining.emit(None)
             else:

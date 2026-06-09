@@ -46,7 +46,7 @@ class MainWindow(QMainWindow):
         self.resize(880, 600)
 
         self.sig_overlay = Overlay(config.font_family, config.font_size)
-        self.mining_overlay = BreakabilityOverlay()
+        self.mining_overlay = BreakabilityOverlay(config)
 
         self.home = HomeView(self)
         self.sigs = SigsView(self)
@@ -71,6 +71,8 @@ class MainWindow(QMainWindow):
         row.addWidget(self.nav)
         row.addWidget(self.stack, 1)
 
+        self.mining_overlay.plan_changed.connect(self._on_plan)
+
         self.worker = Worker(config)
         self.worker.signals.sig.connect(self._on_sig)
         self.worker.signals.mining.connect(self._on_mining)
@@ -80,6 +82,7 @@ class MainWindow(QMainWindow):
         self.hotkey_fired.connect(lambda: self.set_capture(not self.config.enabled))
         self.update_found.connect(self.home.set_update)
         self.register_hotkey()
+        self.mining_overlay.install_hook()
         self._start_update_check()
 
     # ---- worker slots ----
@@ -93,13 +96,18 @@ class MainWindow(QMainWindow):
         else:
             self.sig_overlay.hide()
 
-    def _on_mining(self, plan) -> None:
-        self.home.live_mine.set_lines(fmt.mining_lines(plan, self.config))  # Home stays text
-        if self.config.show_mining_overlay and self.config.rock_calibrated and plan is not None:
+    def _on_mining(self, rock) -> None:
+        # Feed the scanned rock to the overlay; it evaluates the user's live config and
+        # echoes the resulting Plan back via plan_changed (-> Home + nothing else here).
+        if self.config.show_mining_overlay and self.config.rock_calibrated:
             r = self.config.rock_region
-            self.mining_overlay.set_plan(plan, self.config, (r.x + r.width // 2, r.y - 4))
+            self.mining_overlay.set_rock(rock, self.config, (r.x + r.width // 2, r.y - 4))
         else:
             self.mining_overlay.hide()
+            self.home.live_mine.set_lines(fmt.mining_lines(None, self.config))
+
+    def _on_plan(self, plan) -> None:
+        self.home.live_mine.set_lines(fmt.mining_lines(plan, self.config))
 
     def _style(self, overlay: Overlay) -> None:
         overlay._family = self.config.font_family
@@ -126,6 +134,7 @@ class MainWindow(QMainWindow):
     def loadouts_changed(self) -> None:
         self.home.refresh()
         self.mine.refresh()
+        self.mining_overlay.reload_loadout()
 
     def open_releases(self) -> None:
         import webbrowser
@@ -163,6 +172,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.worker.stop()
+        self.mining_overlay.stop()
         try:
             import keyboard
 

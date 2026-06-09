@@ -39,17 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"sig-translator {__version__}")
     parser.add_argument("--snapshot", action="store_true", help="save a PNG of the capture region and exit")
     parser.add_argument("--legacy", action="store_true", help="launch the old Tkinter UI")
-    parser.add_argument("--app", action="store_true", help="launch the real Qt control panel")
-    parser.add_argument("--proto-key", default="caps lock", help="hold key for the overlay spike")
     args = parser.parse_args(argv)
-
-    # TEMP (ui-redesign): the hold-to-interact overlay spike is what we're iterating on,
-    # so it's the no-flag default for these dev builds. Restore ui.app.run() as default
-    # (and drop this) once the spike is folded into the real overlay.
-    if not (args.snapshot or args.legacy or args.app):
-        from .proto_hold_overlay import run as run_proto
-
-        return run_proto(args.proto_key)
 
     config = Config.load()
 
