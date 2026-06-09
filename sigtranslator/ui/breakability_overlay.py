@@ -26,7 +26,7 @@ from PySide6.QtGui import (
     QPolygonF,
     QShortcut,
 )
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from ..mining import LASERS_BY_KEY, MODULES_BY_KEY, Turret, difficulty, eval_config
 
@@ -202,7 +202,13 @@ class BreakabilityOverlay(QWidget):
         if self._rock is None:
             self._plan = None
             self.plan_changed.emit(None)
-            if not self.active:
+            if self.active:            # keep the editor open, just show a "no scan" state
+                self._relayout()
+                self._place()
+                self.update()
+                if not self.isVisible():
+                    self.show()
+            else:
                 self.hide()
             return
         self._plan = eval_config(self._rock, self._active_turrets())
@@ -230,25 +236,30 @@ class BreakabilityOverlay(QWidget):
         hs, rs, ss = self._sizes()
         hfm, rfm, sfm = (QFontMetrics(self._font(hs)), QFontMetrics(self._font(rs)),
                          QFontMetrics(self._font(ss)))
-        pill_text, _pc = difficulty(plan)
         rh = rfm.height()
 
-        band = (_fnum(plan.power_max) if plan.power_min == plan.power_max
-                else f"{_fnum(plan.power_min)}–{_fnum(plan.power_max)}")
-        hr = plan.headroom
-        hr_color = "#33dd66" if hr >= 0 else "#ff5555"
-        rock_rows = [("MASS", _fnum(plan.rock.mass), WHITE),
-                     ("RESISTANCE", f"{plan.rock.resistance:.0f}%", WHITE)]
-        metric_rows = [("REQUIRED", _fnum(plan.required), WHITE),
-                       ("YOUR POWER", band, WHITE),
-                       ("HEADROOM", f"{'+' if hr >= 0 else '−'}{_fnum(abs(hr))}", hr_color)]
-        if plan.stable_pct is not None and plan.kind != "impossible":
-            metric_rows.append(("HOLD AT", f"{plan.stable_pct:.0f}%", "#cfd3d6"))
+        if plan is not None:
+            pill_text, pill_color = difficulty(plan)
+            band = (_fnum(plan.power_max) if plan.power_min == plan.power_max
+                    else f"{_fnum(plan.power_min)}–{_fnum(plan.power_max)}")
+            hr = plan.headroom
+            hr_color = "#33dd66" if hr >= 0 else "#ff5555"
+            rock_rows = [("MASS", _fnum(plan.rock.mass), WHITE),
+                         ("RESISTANCE", f"{plan.rock.resistance:.0f}%", WHITE)]
+            metric_rows = [("REQUIRED", _fnum(plan.required), WHITE),
+                           ("YOUR POWER", band, WHITE),
+                           ("HEADROOM", f"{'+' if hr >= 0 else '−'}{_fnum(abs(hr))}", hr_color)]
+            if plan.stable_pct is not None and plan.kind != "impossible":
+                metric_rows.append(("HOLD AT", f"{plan.stable_pct:.0f}%", "#cfd3d6"))
+            w_rows = max(rfm.horizontalAdvance(l) + 50 + rfm.horizontalAdvance(v)
+                         for l, v, _ in rock_rows + metric_rows)
+        else:  # summoned with no rock scanned yet
+            pill_text, pill_color = "NO SCAN", MUTED
+            rock_rows = metric_rows = []
+            w_rows = rfm.horizontalAdvance("waiting for a rock scan…")
 
         # content width
         w_header = hfm.horizontalAdvance("BREAKABILITY") + 14 + sfm.horizontalAdvance(pill_text) + 18
-        w_rows = max(rfm.horizontalAdvance(l) + 50 + rfm.horizontalAdvance(v)
-                     for l, v, _ in rock_rows + metric_rows)
         if self.active:
             w_body = 0
             for h in self.heads:
@@ -265,15 +276,18 @@ class BreakabilityOverlay(QWidget):
 
         items = []
         y = PAD
-        items.append(("header", y, pill_text)); y += hfm.height()
+        items.append(("header", y, pill_text, pill_color)); y += hfm.height()
         items.append(("hline", y + 2, cw)); y += 12
-        for l, v, vc in rock_rows:
-            items.append(("row", y, l, v, vc)); y += rh
-        y += 8
-        items.append(("gauge", y, 14, cw)); y += 14 + 10
-        for l, v, vc in metric_rows:
-            items.append(("row", y, l, v, vc)); y += rh
-        y += 6
+        if plan is not None:
+            for l, v, vc in rock_rows:
+                items.append(("row", y, l, v, vc)); y += rh
+            y += 8
+            items.append(("gauge", y, 14, cw)); y += 14 + 10
+            for l, v, vc in metric_rows:
+                items.append(("row", y, l, v, vc)); y += rh
+            y += 6
+        else:
+            items.append(("hint", y, "waiting for a rock scan…")); y += sfm.height() + 4
         items.append(("hline", y, cw)); y += 8
 
         if self.active:
@@ -315,7 +329,7 @@ class BreakabilityOverlay(QWidget):
 
     # ---- paint ----
     def paintEvent(self, _e) -> None:
-        if not self._plan or not self._items:
+        if not self._items:
             return
         w, h = self._w, self._h
         accent = self._cfg.accent_color if self._cfg else "#29d3ff"
@@ -335,7 +349,7 @@ class BreakabilityOverlay(QWidget):
         for it in self._items:
             kind = it[0]
             if kind == "header":
-                self._draw_header(p, it[1], it[2], w, accent, hs, ss)
+                self._draw_header(p, it[1], it[2], it[3], w, accent, hs, ss)
             elif kind == "hline":
                 _, y, cw = it
                 c = QColor(accent); c.setAlpha(90)
@@ -366,11 +380,10 @@ class BreakabilityOverlay(QWidget):
                 p.setPen(QColor(MUTED)); p.drawText(PAD, int(y + fm.ascent()), t)
         p.end()
 
-    def _draw_header(self, p, y, pill, w, accent, hs, ss) -> None:
+    def _draw_header(self, p, y, pill, pcol, w, accent, hs, ss) -> None:
         f = self._font(hs); fm = QFontMetrics(f); p.setFont(f)
         p.setPen(QColor(accent))
         p.drawText(PAD, y + fm.ascent(), "BREAKABILITY")
-        _t, pcol = difficulty(self._plan)
         sf = self._font(ss); sfm = QFontMetrics(sf)
         pw = sfm.horizontalAdvance(pill) + 16
         ph = sfm.height() + 4
@@ -549,14 +562,18 @@ class BreakabilityOverlay(QWidget):
 
     # ---- hold-to-interact focus swap ----
     def _enter(self) -> None:
-        if self.active or self._plan is None:
+        if self.active:
             return
         self.active = True
         self.game_hwnd = _get_foreground()
-        hwnd = int(self.winId())
-        _set_interactive(hwnd, True)
+        if self._anchor is None:
+            self._anchor = self._fallback_anchor()
         self._relayout()
         self._place()
+        if not self.isVisible():
+            self.show()
+        hwnd = int(self.winId())
+        _set_interactive(hwnd, True)
         self.update()
         _force_foreground(hwnd)
 
@@ -568,9 +585,21 @@ class BreakabilityOverlay(QWidget):
         hwnd = int(self.winId())
         _set_interactive(hwnd, False)
         _restore_foreground(self.game_hwnd)
-        self._relayout()
-        self._place()
-        self.update()
+        if self._plan is None:     # nothing to show when idle without a scan
+            self.hide()
+        else:
+            self._relayout()
+            self._place()
+            self.update()
+
+    def _fallback_anchor(self):
+        """Where to put the panel when summoned with no live scan yet."""
+        cfg = self._cfg
+        if cfg is not None and getattr(cfg, "rock_calibrated", False):
+            r = cfg.rock_region
+            return (r.x + r.width // 2, r.y)
+        scr = QApplication.primaryScreen().geometry()
+        return (scr.width() // 2, scr.height() // 2 + 120)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
