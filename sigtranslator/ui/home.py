@@ -22,7 +22,15 @@ from PySide6.QtWidgets import (
 
 from .breakability_overlay import BreakabilityMirror
 from .overlay import SigMirror
-from .widgets import card
+from .widgets import SegmentToggle, card
+
+_GUI_TIP = "Scanner results show only here in the app — nothing is drawn over the game."
+_GAME_TIP = "Also draw the overlay over the game (plus the readout here)."
+
+
+def _overlay_toggle(value: bool) -> SegmentToggle:
+    return SegmentToggle("GUI only", "GUI + in-game", value,
+                         left_tip=_GUI_TIP, right_tip=_GAME_TIP)
 
 
 class HomeView(QWidget):
@@ -44,13 +52,13 @@ class HomeView(QWidget):
         self.refresh()
 
     # ---- column builders ----
-    def _header_row(self, title: str, overlay_cb: QCheckBox) -> QHBoxLayout:
+    def _header_row(self, title: str, overlay_toggle: QWidget) -> QHBoxLayout:
         row = QHBoxLayout()
         h = QLabel(title)
         h.setObjectName("H2")
         row.addWidget(h)
         row.addStretch(1)
-        row.addWidget(overlay_cb)
+        row.addWidget(overlay_toggle)
         return row
 
     @staticmethod
@@ -71,8 +79,7 @@ class HomeView(QWidget):
 
     def _sig_column(self, cfg) -> QWidget:
         c, lay = card()
-        self.sig_ov = QCheckBox("in-game overlay")
-        self.sig_ov.setChecked(cfg.show_sig_overlay)
+        self.sig_ov = _overlay_toggle(cfg.show_sig_overlay)
         self.sig_ov.toggled.connect(self._sig_ov_toggle)
         lay.addLayout(self._header_row("SIGNATURE", self.sig_ov))
 
@@ -105,8 +112,7 @@ class HomeView(QWidget):
 
     def _mine_column(self, cfg) -> QWidget:
         c, lay = card()
-        self.mine_ov = QCheckBox("in-game overlay")
-        self.mine_ov.setChecked(cfg.show_mining_overlay)
+        self.mine_ov = _overlay_toggle(cfg.show_mining_overlay)
         self.mine_ov.toggled.connect(self._mine_ov_toggle)
         lay.addLayout(self._header_row("BREAKABILITY", self.mine_ov))
 
