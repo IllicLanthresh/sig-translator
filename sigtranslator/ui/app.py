@@ -97,14 +97,14 @@ class MainWindow(QMainWindow):
             self.sig_overlay.hide()
 
     def _on_mining(self, rock) -> None:
-        # Feed the scanned rock to the overlay; it evaluates the user's live config and
-        # echoes the resulting Plan back via plan_changed (-> Home + nothing else here).
-        if self.config.show_mining_overlay and self.config.rock_calibrated:
+        # Always feed the scanned rock to the overlay: it evaluates the user's live config
+        # and echoes the Plan back via plan_changed (-> Home readout, always live). It only
+        # *draws* the in-game panel when show_mining_overlay is on (else: silent / 2nd-monitor).
+        anchor = None
+        if self.config.rock_calibrated:
             r = self.config.rock_region
-            self.mining_overlay.set_rock(rock, self.config, (r.x + r.width // 2, r.y - 4))
-        else:
-            self.mining_overlay.hide()
-            self.home.live_mine.set_lines(fmt.mining_lines(None, self.config))
+            anchor = (r.x + r.width // 2, r.y - 4)
+        self.mining_overlay.set_rock(rock, self.config, anchor)
 
     def _on_plan(self, plan) -> None:
         self.home.live_mine.set_lines(fmt.mining_lines(plan, self.config))

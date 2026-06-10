@@ -73,19 +73,6 @@ class SettingsView(QWidget):
         self.rarity.setChecked(cfg.show_rarity)
         self.rarity.toggled.connect(self._rarity)
         alay.addWidget(self.rarity)
-        self.sig_ov = QCheckBox("Signature overlay (in-game)")
-        self.sig_ov.setChecked(cfg.show_sig_overlay)
-        self.sig_ov.toggled.connect(self._sig_ov)
-        alay.addWidget(self.sig_ov)
-        self.mine_ov = QCheckBox("Breakability overlay (in-game)")
-        self.mine_ov.setChecked(cfg.show_mining_overlay)
-        self.mine_ov.toggled.connect(self._mine_ov)
-        alay.addWidget(self.mine_ov)
-        hint = QLabel("Turn both overlays off for a pure second-monitor setup — the readout "
-                      "stays live on the Control page.")
-        hint.setObjectName("Muted")
-        hint.setWordWrap(True)
-        alay.addWidget(hint)
 
         self.preview = LinesView()
         alay.addWidget(QLabel("Preview"))
@@ -150,14 +137,6 @@ class SettingsView(QWidget):
 
     def _rarity(self, on):
         self.ctx.config.show_rarity = bool(on)
-        self._changed()
-
-    def _sig_ov(self, on):
-        self.ctx.config.show_sig_overlay = bool(on)
-        self._changed()
-
-    def _mine_ov(self, on):
-        self.ctx.config.show_mining_overlay = bool(on)
         self._changed()
 
     def _changed(self):

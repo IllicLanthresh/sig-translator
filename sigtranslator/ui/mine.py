@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -104,19 +103,6 @@ class MineView(QWidget):
         title.setObjectName("H1")
         root.addWidget(title)
 
-        c, lay = card("Breakability")
-        trow = QHBoxLayout()
-        self.toggle = QCheckBox("Mining mode")
-        self.toggle.setChecked(cfg.mining_enabled)
-        self.toggle.toggled.connect(self._toggle)
-        trow.addWidget(self.toggle)
-        self.cal_lbl = QLabel()
-        self.cal_lbl.setObjectName("Muted")
-        trow.addWidget(self.cal_lbl)
-        trow.addStretch(1)
-        lay.addLayout(trow)
-        root.addWidget(c)
-
         lc, llay = card("Loadout")
         srow = QHBoxLayout()
         self.switch = QComboBox()
@@ -147,8 +133,6 @@ class MineView(QWidget):
 
     def refresh(self):
         cfg = self.ctx.config
-        r = cfg.rock_region
-        self.cal_lbl.setText(f"{r.width}×{r.height}" if cfg.rock_calibrated else "not calibrated")
         self.switch.blockSignals(True)
         self.switch.clear()
         self.switch.addItems([lo["name"] for lo in cfg.loadouts])
@@ -164,10 +148,6 @@ class MineView(QWidget):
             tc.load(turrets[i] if i < len(turrets) else None)
 
     # ---- events ----
-    def _toggle(self, on):
-        self.ctx.config.mining_enabled = bool(on)
-        self.ctx.config.save()
-
     def _switch(self, name):
         if name:
             self.ctx.config.active_loadout = name

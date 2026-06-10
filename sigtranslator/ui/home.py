@@ -1,8 +1,9 @@
-"""Home view: capture on/off, live readout (mirrors the overlays), quick loadout."""
+"""Control view: per-scanner on/off (+ its overlay), live readout, calibrate, loadout."""
 
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -35,14 +36,22 @@ class HomeView(QWidget):
         self.update_btn.hide()
         root.addWidget(self.update_btn)
 
-        c, lay = card()
-        self.toggle = QPushButton()
-        self.toggle.setObjectName("Primary")
-        self.toggle.setCheckable(True)
-        self.toggle.setChecked(cfg.enabled)
-        self.toggle.setMinimumHeight(42)
-        self.toggle.clicked.connect(lambda: ctx.set_capture(self.toggle.isChecked()))
-        lay.addWidget(self.toggle)
+        c, lay = card("Scanners")
+        # Signatures scanner + its overlay
+        self.sig_toggle = self._scanner_button()
+        self.sig_toggle.clicked.connect(lambda: ctx.set_capture(self.sig_toggle.isChecked()))
+        self.sig_ov = QCheckBox("overlay")
+        self.sig_ov.setChecked(cfg.show_sig_overlay)
+        self.sig_ov.toggled.connect(self._sig_ov)
+        lay.addLayout(self._scanner_row(self.sig_toggle, self.sig_ov))
+        # Mining scanner + its overlay
+        self.mine_toggle = self._scanner_button()
+        self.mine_toggle.clicked.connect(lambda: self._set_mining(self.mine_toggle.isChecked()))
+        self.mine_ov = QCheckBox("overlay")
+        self.mine_ov.setChecked(cfg.show_mining_overlay)
+        self.mine_ov.toggled.connect(self._mine_ov)
+        lay.addLayout(self._scanner_row(self.mine_toggle, self.mine_ov))
+
         brow = QHBoxLayout()
         calb = QPushButton("Calibrate…")
         calb.clicked.connect(ctx.open_calibration)
@@ -73,6 +82,27 @@ class HomeView(QWidget):
 
         self.refresh()
 
+    # ---- builders ----
+    @staticmethod
+    def _scanner_button() -> QPushButton:
+        b = QPushButton()
+        b.setObjectName("Primary")
+        b.setCheckable(True)
+        b.setMinimumHeight(40)
+        return b
+
+    @staticmethod
+    def _scanner_row(toggle: QPushButton, overlay_cb: QCheckBox) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addWidget(toggle, 1)
+        row.addWidget(overlay_cb)
+        return row
+
+    @staticmethod
+    def _btn_text(name: str, on: bool) -> str:
+        return f"●  {name} — scanning" if on else f"○  {name} — off"
+
+    # ---- refresh / external updates ----
     def refresh(self):
         cfg = self.ctx.config
         self.quick.blockSignals(True)
@@ -82,12 +112,19 @@ class HomeView(QWidget):
             self.quick.setCurrentText(cfg.active_loadout)
         self.quick.blockSignals(False)
         self.set_capture(cfg.enabled)
+        self._set_mining_ui(cfg.mining_enabled)
 
     def set_capture(self, on):
-        self.toggle.blockSignals(True)
-        self.toggle.setChecked(on)
-        self.toggle.setText("● Capturing — click to pause" if on else "○ Paused — click to start")
-        self.toggle.blockSignals(False)
+        self.sig_toggle.blockSignals(True)
+        self.sig_toggle.setChecked(on)
+        self.sig_toggle.setText(self._btn_text("Signatures", on))
+        self.sig_toggle.blockSignals(False)
+
+    def _set_mining_ui(self, on):
+        self.mine_toggle.blockSignals(True)
+        self.mine_toggle.setChecked(on)
+        self.mine_toggle.setText(self._btn_text("Mining", on))
+        self.mine_toggle.blockSignals(False)
 
     def set_status(self, text):
         self.status.setText(text)
@@ -95,6 +132,20 @@ class HomeView(QWidget):
     def set_update(self, tag):
         self.update_btn.setText(f"⬆ New version {tag} available — click to download")
         self.update_btn.show()
+
+    # ---- events ----
+    def _set_mining(self, on):
+        self.ctx.config.mining_enabled = bool(on)
+        self.ctx.config.save()
+        self._set_mining_ui(on)
+
+    def _sig_ov(self, on):
+        self.ctx.config.show_sig_overlay = bool(on)
+        self.ctx.config.save()
+
+    def _mine_ov(self, on):
+        self.ctx.config.show_mining_overlay = bool(on)
+        self.ctx.config.save()
 
     def _quick(self, name):
         if name:

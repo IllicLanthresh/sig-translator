@@ -205,6 +205,9 @@ class BreakabilityOverlay(QWidget):
         self._anchor = anchor
         self._refresh()
 
+    def _draw_enabled(self) -> bool:
+        return bool(self._cfg and getattr(self._cfg, "show_mining_overlay", True))
+
     def _refresh(self) -> None:
         if self._rock is None:
             self._plan = None
@@ -218,8 +221,13 @@ class BreakabilityOverlay(QWidget):
             else:
                 self.hide()
             return
+        # Always compute + report the plan (the Control readout stays live even when the
+        # in-game overlay is turned off); only DRAW the panel when the overlay is enabled.
         self._plan = eval_config(self._rock, self._active_turrets())
         self.plan_changed.emit(self._plan)
+        if not self.active and not self._draw_enabled():
+            self.hide()
+            return
         self._relayout()
         self._place()
         self.update()
@@ -535,7 +543,7 @@ class BreakabilityOverlay(QWidget):
 
     # ---- hold-to-interact focus swap ----
     def _enter(self) -> None:
-        if self.active:
+        if self.active or not self._draw_enabled():  # overlay off -> hold does nothing
             return
         self.active = True
         self.game_hwnd = _get_foreground()
