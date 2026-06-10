@@ -80,6 +80,8 @@ class Config:
     # Saved loadouts: [{"name": str, "turrets": [{"laser": key, "modules": [key, ...]}]}].
     loadouts: list = field(default_factory=list)
     active_loadout: str = ""
+    # Hold this key to interact with the breakability overlay (dead-man's-switch).
+    edit_hotkey: str = "caps lock"
     # --- Overlay visibility (off => second-monitor mode; GUI still shows the readout) ---
     show_sig_overlay: bool = True
     show_mining_overlay: bool = True

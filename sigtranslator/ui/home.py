@@ -1,18 +1,28 @@
-"""Control view: per-scanner on/off (+ its overlay), live readout, calibrate, loadout."""
+"""Dashboard: one column per feature (Signature / Breakability), no tabs.
+
+Each column is self-contained: scanner switch, in-game overlay visibility, a live
+mirror of the actual overlay (same renderer — the breakability one is clickable),
+a status line, and the feature's own controls. Subpages (Materials, Loadouts,
+Settings) are reached via drill-in buttons handled by the main window.
+"""
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from .widgets import LinesView, card
+from .breakability_overlay import BreakabilityMirror
+from .overlay import SigMirror
+from .widgets import card
 
 
 class HomeView(QWidget):
@@ -21,86 +31,120 @@ class HomeView(QWidget):
         self.ctx = ctx
         cfg = ctx.config
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 24, 24, 24)
+        root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(14)
-        title = QLabel("Control")
-        title.setObjectName("H1")
-        root.addWidget(title)
 
-        self.update_btn = QPushButton()
-        self.update_btn.setStyleSheet(
-            "QPushButton { color: #ffcc44; font-weight: 700; text-align: left; "
-            "background: transparent; border: none; padding: 0; }"
-        )
-        self.update_btn.clicked.connect(ctx.open_releases)
-        self.update_btn.hide()
-        root.addWidget(self.update_btn)
+        cols = QHBoxLayout()
+        cols.setSpacing(14)
+        cols.addWidget(self._sig_column(cfg), 1)
+        cols.addWidget(self._mine_column(cfg), 1)
+        root.addLayout(cols, 1)
 
-        c, lay = card("Scanners")
-        # Signatures scanner + its overlay
-        self.sig_toggle = self._scanner_button()
-        self.sig_toggle.clicked.connect(lambda: ctx.set_capture(self.sig_toggle.isChecked()))
-        self.sig_ov = QCheckBox("overlay")
-        self.sig_ov.setChecked(cfg.show_sig_overlay)
-        self.sig_ov.toggled.connect(self._sig_ov)
-        lay.addLayout(self._scanner_row(self.sig_toggle, self.sig_ov))
-        # Mining scanner + its overlay
-        self.mine_toggle = self._scanner_button()
-        self.mine_toggle.clicked.connect(lambda: self._set_mining(self.mine_toggle.isChecked()))
-        self.mine_ov = QCheckBox("overlay")
-        self.mine_ov.setChecked(cfg.show_mining_overlay)
-        self.mine_ov.toggled.connect(self._mine_ov)
-        lay.addLayout(self._scanner_row(self.mine_toggle, self.mine_ov))
-
-        brow = QHBoxLayout()
-        calb = QPushButton("Calibrate…")
-        calb.clicked.connect(ctx.open_calibration)
-        brow.addWidget(calb)
-        brow.addStretch(1)
-        brow.addWidget(QLabel("Loadout"))
-        self.quick = QComboBox()
-        self.quick.setMinimumWidth(160)
-        self.quick.currentTextChanged.connect(self._quick)
-        brow.addWidget(self.quick)
-        lay.addLayout(brow)
-        self.status = QLabel("starting…")
-        self.status.setObjectName("Muted")
-        lay.addWidget(self.status)
-        root.addWidget(c)
-
-        live = QHBoxLayout()
-        sc, slay = card("Signature")
-        self.live_sig = LinesView("no signal")
-        slay.addWidget(self.live_sig)
-        live.addWidget(sc, 1)
-        mc, mlay = card("Breakability")
-        self.live_mine = LinesView("no rock")
-        mlay.addWidget(self.live_mine)
-        live.addWidget(mc, 1)
-        root.addLayout(live)
-        root.addStretch(1)
-
+        ctx.mining_overlay.plan_changed.connect(self._mine_status)
         self.refresh()
 
-    # ---- builders ----
+    # ---- column builders ----
+    def _header_row(self, title: str, overlay_cb: QCheckBox) -> QHBoxLayout:
+        row = QHBoxLayout()
+        h = QLabel(title)
+        h.setObjectName("H2")
+        row.addWidget(h)
+        row.addStretch(1)
+        row.addWidget(overlay_cb)
+        return row
+
     @staticmethod
-    def _scanner_button() -> QPushButton:
+    def _switch() -> QPushButton:
         b = QPushButton()
-        b.setObjectName("Primary")
+        b.setObjectName("Scanner")
         b.setCheckable(True)
         b.setMinimumHeight(40)
         return b
 
     @staticmethod
-    def _scanner_row(toggle: QPushButton, overlay_cb: QCheckBox) -> QHBoxLayout:
+    def _centered(widget: QWidget) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.addWidget(toggle, 1)
-        row.addWidget(overlay_cb)
+        row.addStretch(1)
+        row.addWidget(widget)
+        row.addStretch(1)
         return row
 
-    @staticmethod
-    def _btn_text(name: str, on: bool) -> str:
-        return f"●  {name} — scanning" if on else f"○  {name} — off"
+    def _sig_column(self, cfg) -> QWidget:
+        c, lay = card()
+        self.sig_ov = QCheckBox("in-game overlay")
+        self.sig_ov.setChecked(cfg.show_sig_overlay)
+        self.sig_ov.toggled.connect(self._sig_ov_toggle)
+        lay.addLayout(self._header_row("SIGNATURE", self.sig_ov))
+
+        self.sig_toggle = self._switch()
+        self.sig_toggle.clicked.connect(lambda: self.ctx.set_capture(self.sig_toggle.isChecked()))
+        lay.addWidget(self.sig_toggle)
+
+        self.live_sig = SigMirror(cfg, placeholder="no signal")
+        lay.addLayout(self._centered(self.live_sig))
+
+        self.status = QLabel("starting…")
+        self.status.setObjectName("Muted")
+        lay.addWidget(self.status)
+
+        lay.addStretch(1)
+        ctr = QHBoxLayout()
+        calb = QPushButton("Calibrate…")
+        calb.clicked.connect(self.ctx.open_calibration)
+        ctr.addWidget(calb)
+        matb = QPushButton("Materials…")
+        matb.clicked.connect(self.ctx.open_materials)
+        ctr.addWidget(matb)
+        ctr.addStretch(1)
+        self.rarity = QCheckBox("show rarity")
+        self.rarity.setChecked(cfg.show_rarity)
+        self.rarity.toggled.connect(self._rarity_toggle)
+        ctr.addWidget(self.rarity)
+        lay.addLayout(ctr)
+        return c
+
+    def _mine_column(self, cfg) -> QWidget:
+        c, lay = card()
+        self.mine_ov = QCheckBox("in-game overlay")
+        self.mine_ov.setChecked(cfg.show_mining_overlay)
+        self.mine_ov.toggled.connect(self._mine_ov_toggle)
+        lay.addLayout(self._header_row("BREAKABILITY", self.mine_ov))
+
+        self.mine_toggle = self._switch()
+        self.mine_toggle.clicked.connect(lambda: self._set_mining(self.mine_toggle.isChecked()))
+        lay.addWidget(self.mine_toggle)
+
+        self.live_mine = BreakabilityMirror(self.ctx.mining_overlay)
+        lay.addLayout(self._centered(self.live_mine))
+
+        self.mine_status = QLabel("scanner off")
+        self.mine_status.setObjectName("Muted")
+        lay.addWidget(self.mine_status)
+
+        lay.addStretch(1)
+        lrow = QHBoxLayout()
+        lrow.addWidget(QLabel("Loadout"))
+        self.quick = QComboBox()
+        self.quick.currentTextChanged.connect(self._quick)
+        lrow.addWidget(self.quick, 1)
+        editb = QPushButton("Edit loadouts…")
+        editb.clicked.connect(self.ctx.open_loadouts)
+        lrow.addWidget(editb)
+        lay.addLayout(lrow)
+
+        krow = QHBoxLayout()
+        calb = QPushButton("Calibrate…")
+        calb.clicked.connect(self.ctx.open_calibration)
+        krow.addWidget(calb)
+        krow.addStretch(1)
+        krow.addWidget(QLabel("Hold-to-edit key"))
+        self.edit_key = QLineEdit(cfg.edit_hotkey)
+        self.edit_key.setFixedWidth(110)
+        self.edit_key.setAlignment(Qt.AlignCenter)
+        self.edit_key.editingFinished.connect(self._edit_key)
+        krow.addWidget(self.edit_key)
+        lay.addLayout(krow)
+        return c
 
     # ---- refresh / external updates ----
     def refresh(self):
@@ -117,35 +161,52 @@ class HomeView(QWidget):
     def set_capture(self, on):
         self.sig_toggle.blockSignals(True)
         self.sig_toggle.setChecked(on)
-        self.sig_toggle.setText(self._btn_text("Signatures", on))
+        self.sig_toggle.setText("●  Scanning" if on else "○  Off")
         self.sig_toggle.blockSignals(False)
 
     def _set_mining_ui(self, on):
         self.mine_toggle.blockSignals(True)
         self.mine_toggle.setChecked(on)
-        self.mine_toggle.setText(self._btn_text("Breakability", on))
+        self.mine_toggle.setText("●  Scanning" if on else "○  Off")
         self.mine_toggle.blockSignals(False)
 
     def set_status(self, text):
         self.status.setText(text)
 
-    def set_update(self, tag):
-        self.update_btn.setText(f"⬆ New version {tag} available — click to download")
-        self.update_btn.show()
+    def _mine_status(self, plan):
+        if not self.ctx.config.mining_enabled:
+            self.mine_status.setText("scanner off")
+        elif plan is None:
+            self.mine_status.setText("no rock in view")
+        else:
+            self.mine_status.setText("live")
 
     # ---- events ----
     def _set_mining(self, on):
         self.ctx.config.mining_enabled = bool(on)
         self.ctx.config.save()
         self._set_mining_ui(on)
+        self._mine_status(None)
 
-    def _sig_ov(self, on):
+    def _sig_ov_toggle(self, on):
         self.ctx.config.show_sig_overlay = bool(on)
         self.ctx.config.save()
 
-    def _mine_ov(self, on):
+    def _mine_ov_toggle(self, on):
         self.ctx.config.show_mining_overlay = bool(on)
         self.ctx.config.save()
+        self.ctx.mining_overlay._refresh()  # apply immediately, not on the next scan tick
+
+    def _rarity_toggle(self, on):
+        self.ctx.config.show_rarity = bool(on)
+        self.ctx.config.save()
+
+    def _edit_key(self):
+        new = self.edit_key.text().strip().lower()
+        if new and new != self.ctx.config.edit_hotkey:
+            self.ctx.config.edit_hotkey = new
+            self.ctx.config.save()
+            self.ctx.register_edit_key()
 
     def _quick(self, name):
         if name:

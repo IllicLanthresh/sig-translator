@@ -55,9 +55,20 @@ class Calibrator(QWidget):
         self.save_btn.clicked.connect(self._save)
         self.cancel_btn = QPushButton("Cancel  (Esc)", self)
         self.cancel_btn.clicked.connect(self._cancel)
-        cx = vg.width() // 2
-        self.save_btn.setGeometry(cx - 150, 28, 140, 36)
-        self.cancel_btn.setGeometry(cx + 10, 28, 140, 36)
+        self._place_controls()
+
+    def _place_controls(self) -> None:
+        """Anchor Save/Cancel to the active box (multi-monitor: top-center of the
+        virtual desktop may be a different screen than the one being calibrated)."""
+        r = self.boxes[self.active]["rect"]
+        bw, bh, gap = 140, 36, 12
+        total = bw * 2 + gap
+        x = max(8, min(r.center().x() - total // 2, self.width() - total - 8))
+        y = r.bottom() + 16
+        if y + bh > self.height() - 8:  # no room below -> above the box
+            y = max(8, r.top() - bh - 16)
+        self.save_btn.setGeometry(int(x), int(y), bw, bh)
+        self.cancel_btn.setGeometry(int(x + bw + gap), int(y), bw, bh)
 
     # ---- geometry helpers ----
     @staticmethod
@@ -88,8 +99,14 @@ class Calibrator(QWidget):
             if r.contains(int(x), int(y)):
                 self.active = i
                 self._drag = ("move", (x - r.left(), y - r.top()))
+                self._place_controls()
                 return
         self._drag = None
+
+    def mouseDoubleClickEvent(self, e):
+        x, y = int(e.position().x()), int(e.position().y())
+        if any(b["rect"].contains(x, y) for b in self.boxes):
+            self._save()
 
     def mouseMoveEvent(self, e):
         if not self._drag:
@@ -110,6 +127,7 @@ class Calibrator(QWidget):
                     r.setTop(min(int(y), r.bottom() - MIN))
                 elif side == "b":
                     r.setBottom(max(int(y), r.top() + MIN))
+        self._place_controls()
         self.update()
 
     def mouseReleaseEvent(self, _e):
@@ -126,9 +144,11 @@ class Calibrator(QWidget):
             dx = (-step if k == Qt.Key_Left else step if k == Qt.Key_Right else 0)
             dy = (-step if k == Qt.Key_Up else step if k == Qt.Key_Down else 0)
             self.boxes[self.active]["rect"].translate(dx, dy)
+            self._place_controls()
             self.update()
         elif k == Qt.Key_Tab:
             self.active = (self.active + 1) % len(self.boxes)
+            self._place_controls()
             self.update()
 
     # ---- paint ----
@@ -148,10 +168,16 @@ class Calibrator(QWidget):
             p.setPen(col)
             ly = r.top() - 8 if r.top() > 24 else r.bottom() + 18
             p.drawText(r.left(), ly, f"{b['label']}   {r.width()}×{r.height()}")
-        p.setFont(QFont("Bahnschrift", 12))
+        # hint rides with the buttons (anchored to the active box, multi-monitor safe)
+        hint = ("drag = move · handles = resize · arrows = nudge (Shift ×10) · "
+                "Tab = next box · double-click = save")
+        p.setFont(QFont("Bahnschrift", 11))
+        fm = p.fontMetrics()
+        bg = self.save_btn.geometry()
+        hx = max(8, min(bg.left() + 146 - fm.horizontalAdvance(hint) // 2,
+                        self.width() - fm.horizontalAdvance(hint) - 8))
         p.setPen(QColor("#cfd3d6"))
-        p.drawText(self.width() // 2 - 320, 86,
-                   "drag = move · handles = resize · arrows = nudge (Shift ×10) · Tab = next box")
+        p.drawText(int(hx), bg.bottom() + 24, hint)
         p.end()
 
     # ---- commit ----

@@ -29,26 +29,33 @@ def qss(accent: str = "#7fdfff") -> str:
     QLabel#H2 {{ font-size: 15px; font-weight: 700; }}
     QLabel#Muted {{ color: {MUTED}; }}
 
-    /* Sidebar nav */
-    QListWidget#Nav {{
+    /* Header bar */
+    QWidget#Header {{
         background: {PANEL};
+        border-bottom: 1px solid {BORDER};
+    }}
+    QPushButton#Ghost {{
+        background: transparent;
         border: none;
-        border-right: 1px solid {BORDER};
-        outline: 0;
-        padding: 10px 8px;
-    }}
-    QListWidget#Nav::item {{
-        padding: 10px 14px;
-        border-radius: 10px;
-        margin: 2px 4px;
         color: {MUTED};
+        font-size: 17px;
+        padding: 4px 10px;
     }}
-    QListWidget#Nav::item:selected {{
+    QPushButton#Ghost:hover {{ color: {accent}; }}
+
+    /* Scanner switches: dim when off, accent when scanning */
+    QPushButton#Scanner {{
         background: {PANEL_2};
-        color: {accent};
+        border: 1px solid {BORDER};
+        color: {MUTED};
         font-weight: 700;
     }}
-    QListWidget#Nav::item:hover {{ background: {PANEL_2}; }}
+    QPushButton#Scanner:hover {{ border-color: {accent}; }}
+    QPushButton#Scanner:checked {{
+        background: {accent};
+        color: #06121a;
+        border: none;
+    }}
 
     /* Buttons */
     QPushButton {{

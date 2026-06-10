@@ -69,11 +69,6 @@ class SettingsView(QWidget):
         frow.addWidget(self.font, 1)
         alay.addLayout(frow)
 
-        self.rarity = QCheckBox("Show rarity in the label, e.g. (Epic)")
-        self.rarity.setChecked(cfg.show_rarity)
-        self.rarity.toggled.connect(self._rarity)
-        alay.addWidget(self.rarity)
-
         self.preview = LinesView()
         alay.addWidget(QLabel("Preview"))
         alay.addWidget(self.preview)
@@ -117,7 +112,8 @@ class SettingsView(QWidget):
     def _refresh_preview(self):
         cfg = self.ctx.config
         self.preview.set_font_spec(cfg.font_family, cfg.font_size)
-        self.preview.set_lines([(f"[ 6,770 ]", cfg.accent_color), ("Riccite ×2  (Epic)", "#bf5bd6")])
+        suffix = "  (Epic)" if cfg.show_rarity else ""
+        self.preview.set_lines([("[ 6,770 ]", cfg.accent_color), (f"Riccite ×2{suffix}", "#bf5bd6")])
 
     def _pick_accent(self):
         col = QColorDialog.getColor()
@@ -133,10 +129,6 @@ class SettingsView(QWidget):
 
     def _font(self, name):
         self.ctx.config.font_family = name
-        self._changed()
-
-    def _rarity(self, on):
-        self.ctx.config.show_rarity = bool(on)
         self._changed()
 
     def _changed(self):

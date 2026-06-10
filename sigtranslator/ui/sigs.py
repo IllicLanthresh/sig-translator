@@ -25,7 +25,7 @@ class SigsView(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(14)
-        title = QLabel("Signatures")
+        title = QLabel("Materials")
         title.setObjectName("H1")
         root.addWidget(title)
 

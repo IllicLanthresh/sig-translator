@@ -1,8 +1,9 @@
-"""Qt app: single window (Home / Sigs / Mine / Look / Setup) + the two overlays.
+"""Qt app: header bar + drill-in pages (Dashboard / Materials / Loadouts / Settings).
 
 This is the controller. It owns the config, the capture/OCR worker (a background thread
-that emits Qt signals), the two click-through overlays, and the views. Worker results
-fan out to the overlays (when enabled) and the Home live panels.
+that emits Qt signals), the two click-through overlays, and the pages. Worker results
+fan out to the overlays (when enabled) and the dashboard mirrors. Navigation is
+drill-in: the dashboard is home; subpages get a ← back button in the header.
 """
 
 from __future__ import annotations
@@ -14,9 +15,11 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
-    QListWidget,
+    QLabel,
     QMainWindow,
+    QPushButton,
     QStackedWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -32,8 +35,6 @@ from .settings import SettingsView
 from .sigs import SigsView
 from .worker import Worker
 
-_NAV = ["◉  Control", "⌖  Sigs", "⛏  Loadouts", "⚙  Settings"]
-
 
 class MainWindow(QMainWindow):
     hotkey_fired = Signal()
@@ -43,10 +44,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = config
         self.setWindowTitle(f"sig-translator  v{__version__}")
-        self.resize(880, 600)
+        self.resize(900, 620)
 
         self.sig_overlay = Overlay(config.font_family, config.font_size)
-        self.mining_overlay = BreakabilityOverlay(config)
+        self.mining_overlay = BreakabilityOverlay(config, trigger=config.edit_hotkey)
 
         self.home = HomeView(self)
         self.sigs = SigsView(self)
@@ -55,23 +56,16 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         self.setCentralWidget(central)
-        row = QHBoxLayout(central)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(0)
-        self.nav = QListWidget()
-        self.nav.setObjectName("Nav")
-        self.nav.setFixedWidth(150)
-        for n in _NAV:
-            self.nav.addItem(n)
+        col = QVBoxLayout(central)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        col.addWidget(self._build_header())
         self.stack = QStackedWidget()
         for v in (self.home, self.sigs, self.mine, self.settings):
             self.stack.addWidget(v)
-        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
-        self.nav.setCurrentRow(0)
-        row.addWidget(self.nav)
-        row.addWidget(self.stack, 1)
-
-        self.mining_overlay.plan_changed.connect(self._on_plan)
+        self.stack.currentChanged.connect(
+            lambda i: self.back_btn.setVisible(i != 0))
+        col.addWidget(self.stack, 1)
 
         self.worker = Worker(config)
         self.worker.signals.sig.connect(self._on_sig)
@@ -80,10 +74,54 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
         self.hotkey_fired.connect(lambda: self.set_capture(not self.config.enabled))
-        self.update_found.connect(self.home.set_update)
+        self.update_found.connect(self.set_update)
         self.register_hotkey()
         self.mining_overlay.install_hook()
         self._start_update_check()
+
+    def _build_header(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("Header")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 8, 12, 8)
+        row.setSpacing(10)
+        self.back_btn = QPushButton("←  back")
+        self.back_btn.setObjectName("Ghost")
+        self.back_btn.clicked.connect(self.go_home)
+        self.back_btn.setVisible(False)
+        row.addWidget(self.back_btn)
+        title = QLabel("SIG-TRANSLATOR")
+        title.setObjectName("H2")
+        row.addWidget(title)
+        ver = QLabel(f"v{__version__}")
+        ver.setObjectName("Muted")
+        row.addWidget(ver)
+        row.addStretch(1)
+        self.update_btn = QPushButton()
+        self.update_btn.setStyleSheet(
+            "QPushButton { color: #ffcc44; font-weight: 700; background: transparent; "
+            "border: none; padding: 0; }")
+        self.update_btn.clicked.connect(self.open_releases)
+        self.update_btn.hide()
+        row.addWidget(self.update_btn)
+        gear = QPushButton("⚙")
+        gear.setObjectName("Ghost")
+        gear.clicked.connect(self.open_settings)
+        row.addWidget(gear)
+        return bar
+
+    # ---- navigation (drill-in) ----
+    def go_home(self) -> None:
+        self.stack.setCurrentWidget(self.home)
+
+    def open_materials(self) -> None:
+        self.stack.setCurrentWidget(self.sigs)
+
+    def open_loadouts(self) -> None:
+        self.stack.setCurrentWidget(self.mine)
+
+    def open_settings(self) -> None:
+        self.stack.setCurrentWidget(self.settings)
 
     # ---- worker slots ----
     def _on_sig(self, matches, number) -> None:
@@ -97,17 +135,13 @@ class MainWindow(QMainWindow):
             self.sig_overlay.hide()
 
     def _on_mining(self, rock) -> None:
-        # Always feed the scanned rock to the overlay: it evaluates the user's live config
-        # and echoes the Plan back via plan_changed (-> Home readout, always live). It only
-        # *draws* the in-game panel when show_mining_overlay is on (else: silent / 2nd-monitor).
+        # Feed the scanned rock to the overlay; it evaluates the user's live config,
+        # mirrors itself onto the dashboard, and only draws in-game when allowed.
         anchor = None
         if self.config.rock_calibrated:
             r = self.config.rock_region
             anchor = (r.x + r.width // 2, r.y - 4)
         self.mining_overlay.set_rock(rock, self.config, anchor)
-
-    def _on_plan(self, plan) -> None:
-        self.home.live_mine.set_lines(fmt.mining_lines(plan, self.config))
 
     def _style(self, overlay: Overlay) -> None:
         overlay._family = self.config.font_family
@@ -122,7 +156,7 @@ class MainWindow(QMainWindow):
     def open_calibration(self) -> None:
         from .calibrate import calibrate
 
-        if calibrate(self.config, mining=self.config.mining_enabled):
+        if calibrate(self.config, mining=True):
             self.sigs.refresh()
             self.mine.refresh()
 
@@ -142,6 +176,15 @@ class MainWindow(QMainWindow):
         from ..update import RELEASES_URL
 
         webbrowser.open(RELEASES_URL)
+
+    def set_update(self, tag: str) -> None:
+        self.update_btn.setText(f"⬆ v{tag} available")
+        self.update_btn.show()
+
+    def register_edit_key(self) -> None:
+        # set_trigger clears ALL keyboard hooks (lib limitation), so re-add the scan hotkey
+        self.mining_overlay.set_trigger(self.config.edit_hotkey)
+        self.register_hotkey()
 
     def register_hotkey(self) -> None:
         try:

@@ -127,6 +127,7 @@ class BreakabilityOverlay(QWidget):
     released = Signal()
     tap = Signal()
     plan_changed = Signal(object)  # latest Plan (or None) so the app can mirror to Home
+    layout_changed = Signal()      # items rebuilt -> GUI mirror resizes/repaints
 
     HOLD_MS = 250
 
@@ -209,26 +210,16 @@ class BreakabilityOverlay(QWidget):
         return bool(self._cfg and getattr(self._cfg, "show_mining_overlay", True))
 
     def _refresh(self) -> None:
-        if self._rock is None:
-            self._plan = None
-            self.plan_changed.emit(None)
-            if self.active:            # keep the editor open, just show a "no scan" state
-                self._relayout()
-                self._place()
-                self.update()
-                if not self.isVisible():
-                    self.show()
-            else:
-                self.hide()
-            return
-        # Always compute + report the plan (the Control readout stays live even when the
-        # in-game overlay is turned off); only DRAW the panel when the overlay is enabled.
-        self._plan = eval_config(self._rock, self._active_turrets())
+        # Always compute + relayout (the GUI mirror stays live even when the in-game
+        # panel is hidden); only DRAW the floating window when allowed.
+        self._plan = (eval_config(self._rock, self._active_turrets())
+                      if self._rock is not None else None)
         self.plan_changed.emit(self._plan)
-        if not self.active and not self._draw_enabled():
+        self._relayout()
+        draw = self.active or (self._plan is not None and self._draw_enabled())
+        if not draw:
             self.hide()
             return
-        self._relayout()
         self._place()
         self.update()
         if not self.isVisible():
@@ -320,6 +311,7 @@ class BreakabilityOverlay(QWidget):
 
         self._items = items
         self._w, self._h = width, y + PAD
+        self.layout_changed.emit()
 
     def _hint_text(self) -> str:
         if self.active:
@@ -333,14 +325,18 @@ class BreakabilityOverlay(QWidget):
         cx, ey = self._anchor
         self.move(max(0, int(cx - self._w / 2)), max(0, int(ey - self._h)))
 
-    # ---- paint ----
+    # ---- paint (shared verbatim by the floating window and the GUI mirror) ----
     def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        self.paint_panel(p)
+        p.end()
+
+    def paint_panel(self, p: QPainter) -> None:
         if not self._items:
             return
         w, h = self._w, self._h
         accent = self._cfg.accent_color if self._cfg else "#29d3ff"
         hs, rs, ss = self._sizes()
-        p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
 
         path = QPainterPath()
@@ -382,7 +378,6 @@ class BreakabilityOverlay(QWidget):
                 _, y, t = it
                 f = self._font(ss, bold=False); fm = QFontMetrics(f); p.setFont(f)
                 p.setPen(QColor(MUTED)); p.drawText(PAD, int(y + fm.ascent()), t)
-        p.end()
 
     def _draw_header(self, p, y, pill, pcol, w, accent, hs, ss) -> None:
         f = self._font(hs); fm = QFontMetrics(f); p.setFont(f)
@@ -457,22 +452,24 @@ class BreakabilityOverlay(QWidget):
             p.setBrush(QColor(accent)); p.setPen(Qt.NoPen)
             p.drawPolygon(tri)
 
-    # ---- interaction ----
-    def mousePressEvent(self, event) -> None:
-        if not self.active:
-            return
-        pos = event.position()
+    # ---- interaction (shared hit-test: the in-game editor and the GUI mirror) ----
+    def toggle_at(self, pos) -> bool:
         for it in self._items:
             if it[0] == "headrow" and it[4].contains(pos):
                 self.heads[it[2]]["on"] = not self.heads[it[2]]["on"]
                 self._after_toggle()
-                return
+                return True
             if it[0] == "actchip" and it[7].contains(pos):
                 idx, ai = it[4], it[5]
                 fire = self.heads[idx]["firing"]
                 fire.discard(ai) if ai in fire else fire.add(ai)
                 self._after_toggle()
-                return
+                return True
+        return False
+
+    def mousePressEvent(self, event) -> None:
+        if self.active:
+            self.toggle_at(event.position())
 
     def _after_toggle(self) -> None:
         if self._rock is not None:
@@ -506,6 +503,29 @@ class BreakabilityOverlay(QWidget):
                 self._hook = None
         except Exception:
             pass
+
+    def set_trigger(self, key: str) -> None:
+        """Rebind the hold-to-interact key at runtime. The caller must re-register any
+        other global hotkeys afterwards (we clear ALL keyboard hooks to drop the old
+        press/release handlers, which the keyboard lib gives us no handle for)."""
+        key = (key or "caps lock").strip().lower()
+        if key == self.trigger:
+            return
+        if self.active:
+            self._leave()
+        self._hook = None
+        try:
+            import keyboard
+
+            keyboard.unhook_all()
+        except Exception:
+            pass
+        self.trigger = key
+        self._caps_down = False
+        self._engaged = False
+        self.install_hook()
+        self._relayout()  # the idle hint names the key
+        self.update()
 
     def _on_caps(self, event) -> None:
         import threading
@@ -586,3 +606,40 @@ class BreakabilityOverlay(QWidget):
         super().showEvent(event)
         if not self.active:
             _set_interactive(int(self.winId()), False)
+
+
+class BreakabilityMirror(QWidget):
+    """GUI twin of the breakability overlay — same items, same painter, same hit-test.
+
+    The overlay object owns the state and layout; this widget just renders them in the
+    dashboard and forwards clicks, so the in-game panel and the GUI can never drift.
+    Clicks here toggle heads/modules even while the in-game panel is idle.
+    """
+
+    def __init__(self, overlay: BreakabilityOverlay) -> None:
+        super().__init__()
+        self._ov = overlay
+        self.setMinimumSize(MINW, 64)
+        overlay.layout_changed.connect(self._sync)
+        self._sync()
+
+    def _sync(self) -> None:
+        ov = self._ov
+        if ov._items:
+            self.setFixedSize(ov._w, ov._h)
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        ov = self._ov
+        if not ov._items:
+            f = QFont(ov._cfg.font_family if ov._cfg else "Bahnschrift", 11)
+            p.setFont(f)
+            p.setPen(QColor(MUTED))
+            p.drawText(self.rect(), Qt.AlignCenter, "no scan")
+        else:
+            ov.paint_panel(p)
+        p.end()
+
+    def mousePressEvent(self, event) -> None:
+        self._ov.toggle_at(event.position())
