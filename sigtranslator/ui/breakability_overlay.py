@@ -157,8 +157,9 @@ class BreakabilityOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
+        # Window-local on purpose: fires while the overlay holds focus (hold-to-edit),
+        # and never collides with the main window's own Esc (drawer close).
         esc = QShortcut(QKeySequence(Qt.Key_Escape), self)
-        esc.setContext(Qt.ApplicationShortcut)
         esc.activated.connect(self._leave)
         self.pressed.connect(self._enter)
         self.released.connect(self._leave)

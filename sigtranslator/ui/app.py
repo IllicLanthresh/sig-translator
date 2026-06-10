@@ -1,9 +1,9 @@
-"""Qt app: header bar + drill-in pages (Dashboard / Materials / Loadouts / Settings).
+"""Qt app: header bar + command-rail dashboard + drawer submenus.
 
 This is the controller. It owns the config, the capture/OCR worker (a background thread
-that emits Qt signals), the two click-through overlays, and the pages. Worker results
-fan out to the overlays (when enabled) and the dashboard mirrors. Navigation is
-drill-in: the dashboard is home; subpages get a ← back button in the header.
+that emits Qt signals), the two click-through overlays, and the views. The dashboard is
+the only page; Materials / Loadouts / Settings slide in as a right-side drawer over it
+(scrim click, ✕ or Esc to close).
 """
 
 from __future__ import annotations
@@ -11,14 +11,15 @@ from __future__ import annotations
 import sys
 import threading
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QPushButton,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -35,6 +36,8 @@ from .settings import SettingsView
 from .sigs import SigsView
 from .worker import Worker
 
+_DRAWER_W = 470
+
 
 class MainWindow(QMainWindow):
     hotkey_fired = Signal()
@@ -44,7 +47,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = config
         self.setWindowTitle(f"sig-translator  v{__version__}")
-        self.resize(900, 620)
+        self.resize(1100, 720)
 
         self.sig_overlay = Overlay(config.font_family, config.font_size)
         self.mining_overlay = BreakabilityOverlay(config, trigger=config.edit_hotkey)
@@ -59,13 +62,34 @@ class MainWindow(QMainWindow):
         col = QVBoxLayout(central)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
-        col.addWidget(self._build_header())
-        self.stack = QStackedWidget()
-        for v in (self.home, self.sigs, self.mine, self.settings):
-            self.stack.addWidget(v)
-        self.stack.currentChanged.connect(
-            lambda i: self.back_btn.setVisible(i != 0))
-        col.addWidget(self.stack, 1)
+        self.header = self._build_header()
+        col.addWidget(self.header)
+        col.addWidget(self.home, 1)
+
+        # drawer + scrim live above the dashboard (manually positioned children)
+        self.scrim = QWidget(central)
+        self.scrim.setObjectName("Scrim")
+        self.scrim.hide()
+        self.scrim.mousePressEvent = lambda _e: self.close_drawer()
+        self.drawer = QFrame(central)
+        self.drawer.setObjectName("Drawer")
+        dl = QVBoxLayout(self.drawer)
+        dl.setContentsMargins(8, 8, 8, 8)
+        dl.setSpacing(0)
+        topr = QHBoxLayout()
+        topr.addStretch(1)
+        x = QPushButton("✕")
+        x.setObjectName("Ghost")
+        x.clicked.connect(self.close_drawer)
+        topr.addWidget(x)
+        dl.addLayout(topr)
+        self._drawer_slot = QVBoxLayout()
+        dl.addLayout(self._drawer_slot, 1)
+        self._drawer_view: QWidget | None = None
+        self._drawer_anim: QPropertyAnimation | None = None
+        self._anim_hides = False  # whether the running anim's finished -> drawer.hide
+        self.drawer.hide()
+        QShortcut(QKeySequence(Qt.Key_Escape), self, activated=self.close_drawer)
 
         self.worker = Worker(config)
         self.worker.signals.sig.connect(self._on_sig)
@@ -83,13 +107,8 @@ class MainWindow(QMainWindow):
         bar = QWidget()
         bar.setObjectName("Header")
         row = QHBoxLayout(bar)
-        row.setContentsMargins(12, 8, 12, 8)
+        row.setContentsMargins(16, 8, 12, 8)
         row.setSpacing(10)
-        self.back_btn = QPushButton("←  back")
-        self.back_btn.setObjectName("Ghost")
-        self.back_btn.clicked.connect(self.go_home)
-        self.back_btn.setVisible(False)
-        row.addWidget(self.back_btn)
         title = QLabel("SIG-TRANSLATOR")
         title.setObjectName("H2")
         row.addWidget(title)
@@ -110,18 +129,77 @@ class MainWindow(QMainWindow):
         row.addWidget(gear)
         return bar
 
-    # ---- navigation (drill-in) ----
-    def go_home(self) -> None:
-        self.stack.setCurrentWidget(self.home)
+    # ---- drawer navigation ----
+    def _drawer_rect(self, shown: bool) -> QRect:
+        c = self.centralWidget()
+        top = self.header.height()
+        w = min(_DRAWER_W, c.width())
+        x = c.width() - w if shown else c.width()
+        return QRect(x, top, w, c.height() - top)
+
+    def _stop_anim(self) -> None:
+        # stop() emits finished, which may be wired to drawer.hide() — detach first
+        # so reopening mid-close can't hide the drawer we just showed.
+        if self._drawer_anim is not None:
+            if self._anim_hides:
+                self._drawer_anim.finished.disconnect(self.drawer.hide)
+                self._anim_hides = False
+            self._drawer_anim.stop()
+            self._drawer_anim = None
+
+    def open_drawer(self, view: QWidget) -> None:
+        self._stop_anim()
+        if self._drawer_view is not None:
+            self._drawer_slot.removeWidget(self._drawer_view)
+            self._drawer_view.setParent(None)
+        self._drawer_view = view
+        self._drawer_slot.addWidget(view)
+        c = self.centralWidget()
+        self.scrim.setGeometry(0, self.header.height(), c.width(),
+                               c.height() - self.header.height())
+        self.scrim.show()
+        self.scrim.raise_()
+        self.drawer.setGeometry(self._drawer_rect(False))
+        self.drawer.show()
+        self.drawer.raise_()
+        self._animate(self._drawer_rect(True))
+
+    def close_drawer(self) -> None:
+        if not self.drawer.isVisible():
+            return
+        self.scrim.hide()
+        anim = self._animate(self._drawer_rect(False))
+        anim.finished.connect(self.drawer.hide)
+        self._anim_hides = True
+        self.home.refresh()  # settings/loadout edits may have changed rail chips
+
+    def _animate(self, end: QRect) -> QPropertyAnimation:
+        self._stop_anim()
+        a = QPropertyAnimation(self.drawer, b"geometry")
+        a.setDuration(170)
+        a.setEasingCurve(QEasingCurve.OutCubic)
+        a.setStartValue(self.drawer.geometry())
+        a.setEndValue(end)
+        a.start()
+        self._drawer_anim = a
+        return a
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.drawer.isVisible():
+            self.drawer.setGeometry(self._drawer_rect(True))
+            c = self.centralWidget()
+            self.scrim.setGeometry(0, self.header.height(), c.width(),
+                                   c.height() - self.header.height())
 
     def open_materials(self) -> None:
-        self.stack.setCurrentWidget(self.sigs)
+        self.open_drawer(self.sigs)
 
     def open_loadouts(self) -> None:
-        self.stack.setCurrentWidget(self.mine)
+        self.open_drawer(self.mine)
 
     def open_settings(self) -> None:
-        self.stack.setCurrentWidget(self.settings)
+        self.open_drawer(self.settings)
 
     # ---- worker slots ----
     def _on_sig(self, matches, number) -> None:
