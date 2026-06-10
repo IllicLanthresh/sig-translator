@@ -73,7 +73,7 @@ class HomeView(QWidget):
         self.live_sig = LinesView("no signal")
         slay.addWidget(self.live_sig)
         live.addWidget(sc, 1)
-        mc, mlay = card("Mining")
+        mc, mlay = card("Breakability")
         self.live_mine = LinesView("no rock")
         mlay.addWidget(self.live_mine)
         live.addWidget(mc, 1)
@@ -123,7 +123,7 @@ class HomeView(QWidget):
     def _set_mining_ui(self, on):
         self.mine_toggle.blockSignals(True)
         self.mine_toggle.setChecked(on)
-        self.mine_toggle.setText(self._btn_text("Mining", on))
+        self.mine_toggle.setText(self._btn_text("Breakability", on))
         self.mine_toggle.blockSignals(False)
 
     def set_status(self, text):
