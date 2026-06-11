@@ -6,14 +6,22 @@ in-game validations.
 
 The model (community-reverse-engineered, validated in 4.8.1):
     RequiredPower = Mass * DecayPerMass / (1 - effResistance)      # DecayPerMass = 0.2
-    effResistance = (Resistance% / 100) * (1 + resistMod/100)      # clamped to [0, 1)
-    effPower(max|min) = laser.power(max|min) * (1 + sum(module power deltas))   # additive
-    resistMod = laser built-in + sum(module resistance mods)                    # additive
+    effResistance = (Resistance% / 100) * resistFactor             # clamped to [0, 1)
+    resistFactor  = (1 + laser.resist/100) * prod(1 + module.resist/100)
+    effPower(max|min) = laser.power(max|min) * prod(1 + module power deltas)
+Modifier stacking is MULTIPLICATIVE across components (laser x modules x gadgets).
+Measured in-game by Mort13 ("The Break", 2026): a 31% rock with stacked resistance
+modifiers matches the product exactly (13/9/6% measured) where the additive sum
+fails (9/0/0%). Resistance enters the threshold LINEARLY — the datamined
+ResistanceCurveFactor (0.6) does not appear in powerbreak measurements (fitted
+exponent ~1.0 over his 63-rock dataset), so it is not part of this gate.
 A single turret:
     power_max < required        -> can't break
     power_min > required        -> too much power (overshoots; must pulse)
     min <= required <= max      -> controllable
-Instability is NOT part of this (it governs overcharge controllability only).
+Instability is NOT part of this (it governs overcharge controllability only;
+confirmed by Mort13's instability sweep). Distance matters but is not modeled:
+verdicts assume you are within the laser's optimal range.
 """
 
 from __future__ import annotations
@@ -40,8 +48,8 @@ class Module:
     key: str
     name: str
     kind: str          # "Active" | "Passive"
-    power: float = 0.0    # DamageMultiplierChange (additive fraction, e.g. +0.5 / -0.15)
-    resist: float = 0.0   # resistance modifier (%)
+    power: float = 0.0    # power delta as a fraction (+0.5 => x1.5); stacks multiplicatively
+    resist: float = 0.0   # resistance modifier (%); stacks multiplicatively
 
 
 # Mining lasers (4.8.1). power_max = PowerTransfer, power_min = MinPowerTransfer.
@@ -149,7 +157,12 @@ class Turret:
 
     @property
     def power_mult(self) -> float:
-        return 1 + sum(m.power for m in self.modules)
+        # multiplicative across modules (the measured stacking rule for this game's
+        # mining modifiers; identical to additive when <= 1 power module is fitted)
+        mult = 1.0
+        for m in self.modules:
+            mult *= 1 + m.power
+        return mult
 
     @property
     def power_max(self) -> float:
@@ -160,8 +173,13 @@ class Turret:
         return self.laser.power_min * self.power_mult
 
     @property
-    def resist_mod(self) -> float:
-        return self.laser.resist_mod + sum(m.resist for m in self.modules)
+    def resist_factor(self) -> float:
+        """Combined resistance multiplier: laser x modules (measured: multiplicative).
+        <1 reduces the rock's effective resistance, >1 raises it."""
+        f = 1 + self.laser.resist_mod / 100.0
+        for m in self.modules:
+            f *= 1 + m.resist / 100.0
+        return f
 
 
 def turrets_from_loadout(loadout: list) -> list["Turret"]:
@@ -176,9 +194,13 @@ def turrets_from_loadout(loadout: list) -> list["Turret"]:
     return turrets
 
 
-def required_power(mass: float, resistance_pct: float, resist_mod: float) -> float:
-    """Minimum laser power to fracture. inf == impossible (effective resistance >= 100%)."""
-    eff_res = (resistance_pct / 100.0) * (1 + resist_mod / 100.0)
+def required_power(mass: float, resistance_pct: float, resist_factor: float = 1.0) -> float:
+    """Minimum laser power to fracture. inf == impossible (effective resistance >= 100%).
+
+    resist_factor is the combined multiplier from the loadout (Turret.resist_factor),
+    e.g. 0.7 for a bare Helix, 0.55 * 0.752 for Klein + Rime.
+    """
+    eff_res = (resistance_pct / 100.0) * resist_factor
     eff_res = max(0.0, eff_res)
     if eff_res >= 1.0:
         return float("inf")
@@ -197,7 +219,7 @@ class TurretVerdict:
 
 
 def turret_verdict(rock: RockStats, t: Turret) -> TurretVerdict:
-    req = required_power(rock.mass, rock.resistance, t.resist_mod)
+    req = required_power(rock.mass, rock.resistance, t.resist_factor)
     if t.power_max < req:
         state = "cant"
     elif t.power_min > req:
@@ -257,11 +279,30 @@ class Plan:
         return self.power_max > 0 and self.required < self.power_min
 
 
+def combo_required(rock: RockStats, turrets: list[Turret]) -> float:
+    """Raw combined power needed when the heads throttle together.
+
+    Per-beam attenuation: each beam delivers P_i * (1 - R * f_i) — the measured
+    single-laser law (resistance attenuates the laser's power) applied with each
+    laser's OWN resistance factor. Exactly equals required_power for one turret.
+    Cross-laser interaction itself is unmeasured: Mort13's calculator multiplies
+    factors across lasers (more optimistic); per-beam can't over-promise when a
+    resistance-RAISING head (Arbor/Golem/Impact) joins a combo. A beam whose
+    effective resistance reaches 100% contributes nothing (clamped to 0).
+    inf == even full throttle on every head can't make the charge rise.
+    """
+    total = sum(t.power_max for t in turrets)
+    eff = sum(t.power_max * (1 - min(1.0, max(0.0, (rock.resistance / 100.0) * t.resist_factor)))
+              for t in turrets)
+    if total <= 0 or eff <= 0:
+        return float("inf")
+    return rock.mass * DECAY_PER_MASS * total / eff
+
+
 def _best_subset_indices(rock: RockStats, turrets: list[Turret], min_size: int):
     """Smallest subset (>= min_size) whose combined max power breaks the rock.
 
-    Conservative cross-laser resistance: use the single best (most negative) resistance
-    reduction in the subset, not multiplicative stacking (the pre-4.7 uncertain bit).
+    Uses the per-beam attenuation rule (see combo_required).
     Returns (indices, required, total) or None.
     """
     from itertools import combinations
@@ -271,7 +312,7 @@ def _best_subset_indices(rock: RockStats, turrets: list[Turret], min_size: int):
         best = None
         for subset in combinations(idxs, size):
             sub = [turrets[i] for i in subset]
-            req = required_power(rock.mass, rock.resistance, min(t.resist_mod for t in sub))
+            req = combo_required(rock, sub)
             total = sum(t.power_max for t in sub)
             if total < req:
                 continue
@@ -336,8 +377,7 @@ def plan(rock: RockStats, turrets: list[Turret]) -> Plan:
 
     for i, v in enumerate(verdicts):  # nothing, even combined, can break it
         roles[i] = TurretRole(v.name, v.turret.power_max, "can't break", RED)
-    req = (required_power(rock.mass, rock.resistance, min(t.resist_mod for t in turrets))
-           if turrets else float("inf"))
+    req = combo_required(rock, turrets) if turrets else float("inf")
     return Plan(rock, "impossible", req, sum(t.power_max for t in turrets),
                 sum(t.power_min for t in turrets), roles)
 
@@ -363,13 +403,13 @@ def eval_config(rock: RockStats, turrets: list[Turret]) -> Plan:
     """Evaluate ONE user-chosen config (the manual path — no optimizer).
 
     `turrets` is exactly the heads the user has firing, each already carrying the
-    modules currently active on it. Combined power adds across heads; req uses the
-    best (most negative) resistance among them. Returns a Plan whose gauge/pill the
-    overlay renders as-is. Each head gets a simple on-state role (no use/control).
+    modules currently active on it. Power adds across heads; resistance attenuates
+    each beam under its own factor (combo_required). Returns a Plan whose gauge/pill
+    the overlay renders as-is. Each head gets a simple on-state role (no use/control).
     """
     if not turrets:
         return Plan(rock, "impossible", float("inf"), 0.0, 0.0, [])
-    req = required_power(rock.mass, rock.resistance, min(t.resist_mod for t in turrets))
+    req = combo_required(rock, turrets)
     pmax = sum(t.power_max for t in turrets)
     pmin = sum(t.power_min for t in turrets)
     if pmax < req:

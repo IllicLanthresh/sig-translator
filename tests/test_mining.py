@@ -36,13 +36,13 @@ def test_parse_rock_stats_missing():
 
 
 def test_required_power_validated_points():
-    # Helix built-in resistance -30: effRes = 0.19 * 0.70 = 0.133
-    assert math.isclose(required_power(8600, 19, -30), 1983.85, rel_tol=1e-3)
-    assert math.isclose(required_power(1570, 19, -30), 362.16, rel_tol=1e-3)
+    # Helix built-in resistance -30 => factor 0.70: effRes = 0.19 * 0.70 = 0.133
+    assert math.isclose(required_power(8600, 19, 0.70), 1983.85, rel_tol=1e-3)
+    assert math.isclose(required_power(1570, 19, 0.70), 362.16, rel_tol=1e-3)
 
 
 def test_required_power_impossible_at_full_resistance():
-    assert required_power(1000, 100, 0) == float("inf")
+    assert required_power(1000, 100, 1.0) == float("inf")
 
 
 def test_helix_breaks_8600_controllable():
@@ -59,18 +59,49 @@ def test_helix_overpowers_small_rock():
 
 
 def test_focus_hofstede_controls_small_rock():
-    # same rock is controllable on a Focus-Hofstede (min 302 < 362 < 3024)
+    # same rock is controllable on a Focus-Hofstede (min ~303 < 362 < ~3032)
     rock = parse_rock_stats("MASS 1570 RESISTANCE 19%")
     hof = _turret("hofstede_s2", "focus_mk3", "focus_mk3")
-    assert math.isclose(hof.power_max, 3024, rel_tol=1e-6)
-    assert math.isclose(hof.power_min, 302.4, rel_tol=1e-6)
+    assert math.isclose(hof.power_max, 3360 * 0.9025, rel_tol=1e-6)
+    assert math.isclose(hof.power_min, 336 * 0.9025, rel_tol=1e-6)
     assert turret_verdict(rock, hof).state == "ok"
 
 
-def test_module_power_stacks_additively():
-    # two Focus III at -5% each => 0.90 multiplier
+def test_module_power_stacks_multiplicatively():
+    # two Focus III at x0.95 each => 0.9025 multiplier (measured stacking rule)
     hof = _turret("hofstede_s2", "focus_mk3", "focus_mk3")
-    assert math.isclose(hof.power_mult, 0.90, rel_tol=1e-9)
+    assert math.isclose(hof.power_mult, 0.95 * 0.95, rel_tol=1e-9)
+
+
+def test_resist_factors_stack_multiplicatively():
+    # Mort13 ("The Break"): a 31% rock measured 13% with Klein+Rime — matches the
+    # product (0.55 * 0.752 = 0.4136 -> 12.8%), refutes the additive sum (0.302 -> 9.4%).
+    klein_rime = _turret("klein_s2", "rime")
+    assert math.isclose(klein_rime.resist_factor, 0.55 * 0.752, rel_tol=1e-9)
+    assert abs(31 * klein_rime.resist_factor - 13) < 1.0   # measured: 13
+    assert abs(31 * 0.302 - 13) > 3.0                      # additive misses badly
+
+
+def test_resistance_raising_gear_can_hit_unbreakable():
+    # Arbor S2 (+25%) + Forel (+15.5%) => factor 1.44375: a 70% rock reaches
+    # effective resistance >= 100% -> infinite requirement (never negative).
+    arbor = _turret("arbor_s2", "forel")
+    assert math.isclose(arbor.resist_factor, 1.25 * 1.155, rel_tol=1e-9)
+    rock = parse_rock_stats("MASS 5000 RESISTANCE 70%")
+    assert required_power(rock.mass, rock.resistance, arbor.resist_factor) == float("inf")
+    assert turret_verdict(rock, arbor).state == "cant"
+    p = analyze(rock, [arbor])
+    assert p.kind == "impossible"
+    assert p.stable_pct is None
+
+
+def test_mixed_combo_does_not_overpromise():
+    # Helix (0.7) + Arbor (1.25) on 23000/40%: per-beam attenuation delivers
+    # 4080*0.72 + 2400*0.50 = 4137.6 < 4600 needed -> NOT breakable. The old
+    # min-factor rule borrowed the Helix's 0.7 for the Arbor's power and said yes.
+    rock = parse_rock_stats("MASS 23000 RESISTANCE 40%")
+    p = analyze(rock, [_turret("helix_s2"), _turret("arbor_s2")])
+    assert p.kind == "impossible"
 
 
 def test_combo_lasers_not_all_red():
