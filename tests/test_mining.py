@@ -95,13 +95,24 @@ def test_resistance_raising_gear_can_hit_unbreakable():
     assert p.stable_pct is None
 
 
-def test_mixed_combo_does_not_overpromise():
-    # Helix (0.7) + Arbor (1.25) on 23000/40%: per-beam attenuation delivers
-    # 4080*0.72 + 2400*0.50 = 4137.6 < 4600 needed -> NOT breakable. The old
-    # min-factor rule borrowed the Helix's 0.7 for the Arbor's power and said yes.
+def test_mixed_combo_pools_rock_side_factors():
+    # Factors pool ON THE ROCK (multiple lasers share the rock's modifier state).
+    # Helix (0.7) + Arbor (1.25) on 23000/40%: pooled factor 0.875 -> eff res 35%
+    # -> req 4600/0.65 = 7077 > 6480 total -> NOT breakable. The old min-factor
+    # rule borrowed the Helix's 0.7 alone and wrongly said yes (req 6389).
     rock = parse_rock_stats("MASS 23000 RESISTANCE 40%")
     p = analyze(rock, [_turret("helix_s2"), _turret("arbor_s2")])
     assert p.kind == "impossible"
+    assert math.isclose(p.required, 23000 * 0.2 / (1 - 0.40 * 0.875), rel_tol=1e-9)
+
+
+def test_matched_combo_pools_factors_too():
+    # Two Hofstede-Focus heads on one rock: pooled factor 0.7 * 0.7 = 0.49
+    # (each head's -30% applies to the shared rock state, not just its own beam).
+    rock = parse_rock_stats("MASS 30000 RESISTANCE 40%")
+    hof = lambda: _turret("hofstede_s2", "focus_mk3", "focus_mk3")  # noqa: E731
+    p = analyze(rock, [hof(), hof()])
+    assert math.isclose(p.required, 30000 * 0.2 / (1 - 0.40 * 0.49), rel_tol=1e-9)
 
 
 def test_combo_lasers_not_all_red():

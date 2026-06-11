@@ -9,12 +9,14 @@ The model (community-reverse-engineered, validated in 4.8.1):
     effResistance = (Resistance% / 100) * resistFactor             # clamped to [0, 1)
     resistFactor  = (1 + laser.resist/100) * prod(1 + module.resist/100)
     effPower(max|min) = laser.power(max|min) * prod(1 + module power deltas)
-Modifier stacking is MULTIPLICATIVE across components (laser x modules x gadgets).
-Measured in-game by Mort13 ("The Break", 2026): a 31% rock with stacked resistance
-modifiers matches the product exactly (13/9/6% measured) where the additive sum
-fails (9/0/0%). Resistance enters the threshold LINEARLY — the datamined
-ResistanceCurveFactor (0.6) does not appear in powerbreak measurements (fitted
-exponent ~1.0 over his 63-rock dataset), so it is not part of this gate.
+Modifier stacking is MULTIPLICATIVE everywhere — within a loadout (laser x modules
+x gadgets, measured by Mort13 "The Break" 2026: a 31% rock with stacked resistance
+modifiers matches the product exactly where the additive sum fails) AND across
+heads on the same rock (the modifiers are rock-side state: multiple lasers on one
+rock share the same accumulated modifiers and one charge bar — observed in-game).
+Resistance enters the threshold LINEARLY — the datamined ResistanceCurveFactor
+(0.6) does not appear in powerbreak measurements (fitted exponent ~1.0 over his
+63-rock dataset), so it is not part of this gate.
 A single turret:
     power_max < required        -> can't break
     power_min > required        -> too much power (overshoots; must pulse)
@@ -280,29 +282,28 @@ class Plan:
 
 
 def combo_required(rock: RockStats, turrets: list[Turret]) -> float:
-    """Raw combined power needed when the heads throttle together.
+    """Combined power needed for a set of heads working the same rock.
 
-    Per-beam attenuation: each beam delivers P_i * (1 - R * f_i) — the measured
-    single-laser law (resistance attenuates the laser's power) applied with each
-    laser's OWN resistance factor. Exactly equals required_power for one turret.
-    Cross-laser interaction itself is unmeasured: Mort13's calculator multiplies
-    factors across lasers (more optimistic); per-beam can't over-promise when a
-    resistance-RAISING head (Arbor/Golem/Impact) joins a combo. A beam whose
-    effective resistance reaches 100% contributes nothing (clamped to 0).
-    inf == even full throttle on every head can't make the charge rise.
+    The modifiers are ROCK-SIDE state: every laser on the rock applies its factor
+    to the rock itself, shared by all beams (observed in-game: two ships on one
+    rock both see the same accumulated modifiers and one shared charge bar; same
+    rule as Mort13's calculator). So the pool is the product of every
+    participating head's factor, and the threshold uses the combined power:
+        required = mass * 0.2 / (1 - R * prod(f_i))
+    Exactly equals required_power for a single turret. inf == can't rise.
     """
-    total = sum(t.power_max for t in turrets)
-    eff = sum(t.power_max * (1 - min(1.0, max(0.0, (rock.resistance / 100.0) * t.resist_factor)))
-              for t in turrets)
-    if total <= 0 or eff <= 0:
+    if not turrets:
         return float("inf")
-    return rock.mass * DECAY_PER_MASS * total / eff
+    factor = 1.0
+    for t in turrets:
+        factor *= t.resist_factor
+    return required_power(rock.mass, rock.resistance, factor)
 
 
 def _best_subset_indices(rock: RockStats, turrets: list[Turret], min_size: int):
     """Smallest subset (>= min_size) whose combined max power breaks the rock.
 
-    Uses the per-beam attenuation rule (see combo_required).
+    Uses the pooled rock-side modifier rule (see combo_required).
     Returns (indices, required, total) or None.
     """
     from itertools import combinations
@@ -403,8 +404,8 @@ def eval_config(rock: RockStats, turrets: list[Turret]) -> Plan:
     """Evaluate ONE user-chosen config (the manual path — no optimizer).
 
     `turrets` is exactly the heads the user has firing, each already carrying the
-    modules currently active on it. Power adds across heads; resistance attenuates
-    each beam under its own factor (combo_required). Returns a Plan whose gauge/pill
+    modules currently active on it. Power adds across heads; resistance factors pool
+    multiplicatively on the rock (combo_required). Returns a Plan whose gauge/pill
     the overlay renders as-is. Each head gets a simple on-state role (no use/control).
     """
     if not turrets:
